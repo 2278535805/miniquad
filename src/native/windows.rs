@@ -897,6 +897,7 @@ unsafe fn create_window(
     resizable: bool,
     width: i32,
     height: i32,
+    headless: bool,
 ) -> (HWND, HDC) {
     let mut wndclassw: WNDCLASSW = std::mem::zeroed();
 
@@ -1164,6 +1165,7 @@ where
             conf.window_resizable,
             conf.window_width as _,
             conf.window_height as _,
+            conf.headless
         );
         if let Some(icon) = &conf.icon {
             set_icon(wnd, icon);
@@ -1219,8 +1221,9 @@ where
 
         // IMPORTANT: Show window AFTER WGL context is created
         // This ensures IME initializes correctly when window gains focus
-        ShowWindow(wnd, SW_SHOW);
-
+        if !conf.headless {
+            ShowWindow(wnd, SW_SHOW);
+        }
         // Register for raw mouse input (needed for raw_mouse_motion event)
         let mut rawinputdevice: RAWINPUTDEVICE = std::mem::zeroed();
         rawinputdevice.usUsagePage = HID_USAGE_PAGE_GENERIC;
