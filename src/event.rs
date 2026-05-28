@@ -188,7 +188,7 @@ pub trait EventHandler {
     fn key_up_event(&mut self, _keycode: KeyCode, _keymods: KeyMods) {}
 
     /// Default implementation emulates mouse clicks
-    fn touch_event(&mut self, phase: TouchPhase, _id: u64, x: f32, y: f32) {
+    fn touch_event(&mut self, phase: TouchPhase, _id: u64, x: f32, y: f32, _time: f64) {
         if phase == TouchPhase::Started {
             self.mouse_button_down_event(MouseButton::Left, x, y);
         }

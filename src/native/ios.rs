@@ -217,7 +217,8 @@ pub fn define_glk_or_mtk_view(superclass: &Class) -> *const Class {
                 y,
             } => {
                 if let Some(ref mut event_handler) = payload.event_handler {
-                    event_handler.touch_event(phase, touch_id, x, y);
+                    let timestamp: f64 = msg_send![ios_touch, timestamp];
+                    event_handler.touch_event(phase, touch_id, x, y, timestamp);
                 }
             }
             Message::Character { character } => {
