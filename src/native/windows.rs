@@ -1,10 +1,7 @@
-use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf};
+use std::{ffi::OsString, os::windows::ffi::OsStringExt, path::PathBuf, time::SystemTime};
 
 use crate::{
-    conf::{Conf, Icon},
-    event::{KeyMods, MouseButton},
-    native::{NativeDisplayData, Request},
-    CursorIcon, EventHandler,
+    CursorIcon, EventHandler, TouchPhase, conf::{Conf, Icon}, event::{KeyMods, MouseButton}, native::{NativeDisplayData, Request}
 };
 
 use winapi::{
@@ -13,7 +10,6 @@ use winapi::{
         minwindef::{DWORD, HIWORD, LOWORD, LPARAM, LRESULT, MAX_PATH, TRUE, UINT, WPARAM},
         ntdef::NULL,
         windef::{HBRUSH, HCURSOR, HDC, HICON, HWND, POINT, RECT},
-        windowsx::{GET_X_LPARAM, GET_Y_LPARAM},
     },
     um::{
         imm::{HIMC, ImmGetContext, ImmReleaseContext},
@@ -107,8 +103,6 @@ pub(crate) struct WindowsDisplay {
     mouse_scale: f32,
     show_cursor: bool,
     user_cursor: bool,
-    mouse_x: f32,
-    mouse_y: f32,
     cursor: HCURSOR,
     libopengl32: LibOpengl32,
     _msg_wnd: HWND,
@@ -352,6 +346,26 @@ unsafe fn update_clip_rect(hwnd: HWND) {
     ClipCursor(&mut rect as *mut _ as _);
 }
 
+unsafe fn convert_to_absolute(hwnd: HWND, x: i32, y: i32) -> (f32, f32) {
+    let mut rect: RECT = std::mem::zeroed();
+    GetClientRect(hwnd, &mut rect as *mut _ as _);
+    let mut upper_left = POINT {
+        x: rect.left,
+        y: rect.top,
+    };
+    ClientToScreen(hwnd, &mut upper_left as *mut _ as _);
+    let x = x - upper_left.x;
+    let y = y - upper_left.y;
+    (x as f32, y as f32)
+}
+
+fn get_uptime() -> f64 {
+    let start = SystemTime::UNIX_EPOCH;
+    let now = SystemTime::now();
+    let duration = now.duration_since(start).expect("Time went backwards");
+    duration.as_secs() as f64 + duration.subsec_nanos() as f64 * 1e-9
+}
+
 unsafe fn key_mods() -> KeyMods {
     let mut mods = KeyMods::default();
 
@@ -451,72 +465,123 @@ unsafe extern "system" fn win32_wndproc(
                 }
             }
         }
+        WM_POINTERDOWN | WM_POINTERUPDATE | WM_POINTERUP => {
+            let pointer_id = LOWORD(wparam as u32) as u32;
+            let mut entries_count = 0u32;
+            let mut pointers_count = 0u32;
+            if GetPointerFrameInfoHistory(
+                pointer_id,
+                &mut entries_count,
+                &mut pointers_count,
+                std::ptr::null_mut(),
+            ) == 0
+            {
+                return 0;
+            }
+            let pointer_info_count = (entries_count * pointers_count) as usize;
+            let mut pointer_infos = Vec::with_capacity(pointer_info_count);
+            if GetPointerFrameInfoHistory(
+                pointer_id,
+                &mut entries_count,
+                &mut pointers_count,
+                pointer_infos.as_mut_ptr(),
+            ) == 0
+            {
+                return 0;
+            }
+            pointer_infos.set_len(pointer_info_count);
+            let time = get_uptime();
+            for pointer_info in pointer_infos.iter().rev() {
+                match pointer_info.pointerType {
+                    PT_TOUCH => {
+                        let (x, y) = convert_to_absolute(
+                            hwnd,
+                            pointer_info.ptPixelLocationRaw.x,
+                            pointer_info.ptPixelLocationRaw.y,
+                        );
+                        let phase = match pointer_info.pointerFlags & 0xffff0000 {
+                            POINTER_FLAG_UPDATE => TouchPhase::Moved,
+                            POINTER_FLAG_UP => TouchPhase::Ended,
+                            POINTER_FLAG_DOWN => TouchPhase::Started,
+                            x => panic!("Unsupported touch phase: 0x{:x}", x),
+                        };
+
+                        event_handler.touch_event(
+                            phase,
+                            pointer_info.pointerId as _,
+                            x * payload.mouse_scale,
+                            y * payload.mouse_scale,
+                            time as _,
+                        );
+                    }
+                    PT_MOUSE => {
+                        let (x, y) = convert_to_absolute(
+                            hwnd,
+                            pointer_info.ptPixelLocationRaw.x,
+                            pointer_info.ptPixelLocationRaw.y,
+                        );
+                        match pointer_info.ButtonChangeType {
+                            POINTER_CHANGE_FIRSTBUTTON_DOWN => {
+                                event_handler.mouse_button_down_event(
+                                    MouseButton::Left,
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            POINTER_CHANGE_FIRSTBUTTON_UP => {
+                                event_handler.mouse_button_up_event(
+                                    MouseButton::Left,
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            POINTER_CHANGE_SECONDBUTTON_DOWN => {
+                                event_handler.mouse_button_down_event(
+                                    MouseButton::Right,
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            POINTER_CHANGE_SECONDBUTTON_UP => {
+                                event_handler.mouse_button_up_event(
+                                    MouseButton::Right,
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            POINTER_CHANGE_THIRDBUTTON_DOWN => {
+                                event_handler.mouse_button_down_event(
+                                    MouseButton::Middle,
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            POINTER_CHANGE_THIRDBUTTON_UP => {
+                                event_handler.mouse_button_up_event(
+                                    MouseButton::Middle,
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            POINTER_CHANGE_NONE => {
+                                event_handler.mouse_motion_event(
+                                    x * payload.mouse_scale,
+                                    y * payload.mouse_scale,
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            SkipPointerFrameMessages(pointer_id);
+        }
         WM_SETCURSOR => {
             if payload.user_cursor && LOWORD(lparam as _) == HTCLIENT as _ {
                 SetCursor(payload.cursor);
-
                 return 1;
             }
-        }
-        WM_LBUTTONDOWN => {
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-            event_handler.mouse_button_down_event(MouseButton::Left, mouse_x, mouse_y);
-        }
-        WM_RBUTTONDOWN => {
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-
-            event_handler.mouse_button_down_event(MouseButton::Right, mouse_x, mouse_y);
-        }
-        WM_MBUTTONDOWN => {
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-
-            event_handler.mouse_button_down_event(MouseButton::Middle, mouse_x, mouse_y);
-        }
-        WM_LBUTTONUP => {
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-
-            event_handler.mouse_button_up_event(MouseButton::Left, mouse_x, mouse_y);
-        }
-        WM_RBUTTONUP => {
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-
-            event_handler.mouse_button_up_event(MouseButton::Right, mouse_x, mouse_y);
-        }
-        WM_MBUTTONUP => {
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-
-            event_handler.mouse_button_up_event(MouseButton::Middle, mouse_x, mouse_y);
-        }
-
-        WM_MOUSEMOVE => {
-            payload.mouse_x = GET_X_LPARAM(lparam) as f32 * payload.mouse_scale;
-            payload.mouse_y = GET_Y_LPARAM(lparam) as f32 * payload.mouse_scale;
-            // mouse enter was not handled by miniquad anyway
-            // if !_sapp.win32_mouse_tracked {
-            //     _sapp.win32_mouse_tracked = true;
-
-            //     let mut tme: TRACKMOUSEEVENT = std::mem::zeroed();
-
-            //     tme.cbSize = std::mem::size_of_val(&tme) as _;
-            //     tme.dwFlags = TME_LEAVE;
-            //     tme.hwndTrack = wnd;
-            //     TrackMouseEvent(&mut tme as *mut _);
-            //     _sapp_win32_mouse_event(
-            //         sapp_event_type_SAPP_EVENTTYPE_MOUSE_ENTER,
-            //         sapp_mousebutton_SAPP_MOUSEBUTTON_INVALID,
-            //     );
-            // }
-
-            let mouse_x = payload.mouse_x;
-            let mouse_y = payload.mouse_y;
-
-            event_handler.mouse_motion_event(mouse_x, mouse_y);
         }
 
         WM_MOVE if payload.cursor_grabbed => {
@@ -562,9 +627,6 @@ unsafe extern "system" fn win32_wndproc(
             //     sapp_event_type_SAPP_EVENTTYPE_MOUSE_LEAVE,
             //     sapp_mousebutton_SAPP_MOUSEBUTTON_INVALID,
             // );
-        }
-        WM_MOUSEWHEEL => {
-            event_handler.mouse_wheel_event(0.0, (HIWORD(wparam as _) as i16) as f32);
         }
 
         WM_MOUSEHWHEEL => {
@@ -963,6 +1025,7 @@ unsafe fn create_window(
         GetModuleHandleW(NULL as _), // hInstance
         NULL as _,                   // lparam
     );
+    EnableMouseInPointer(1);
     assert!(!hwnd.is_null());
 
     // NOTE: Do not call ShowWindow here!
@@ -1183,8 +1246,6 @@ where
             content_scale: 1.,
             mouse_scale: 1.,
             window_scale: 1.,
-            mouse_x: 0.,
-            mouse_y: 0.,
             show_cursor: true,
             user_cursor: false,
             cursor: std::ptr::null_mut(),
