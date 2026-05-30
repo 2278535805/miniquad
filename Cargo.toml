@@ -42,6 +42,10 @@ winapi = { version = "0.3", features = [
 [target.'cfg(target_os = "android")'.dependencies]
 libc = "0.2"
 ndk-sys = "0.2"
+# Add for initializeContext
+ndk-context = "0.1.1"
+jni = "0.21.1"
+rustls-platform-verifier = "0.6.2"
 
 [target.'cfg(any(target_os = "macos", target_os = "ios"))'.dependencies]
 objc = { package = "objc-rs", version = "0.2" }
