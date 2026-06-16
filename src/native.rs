@@ -87,10 +87,16 @@ pub trait Clipboard: Send + Sync {
 
 pub mod module;
 
-#[cfg(target_os = "linux")]
+#[cfg(target_env = "ohos")]
+pub mod ohos;
+
+#[cfg(target_env = "ohos")]
+pub use ohos::*;
+
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux_x11;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux_wayland;
 
 #[cfg(target_os = "android")]
