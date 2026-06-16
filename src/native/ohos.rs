@@ -11,6 +11,7 @@ use hms_opengtx_binding::{
 };
 use ohos_bundle_binding::get_bundle_info;
 use ohos_hilog_binding::{hilog_error, hilog_fatal, hilog_info};
+use ohos_ime_binding::IME;
 use ohos_init_binding::canIUse;
 use ohos_input_sys::input_manager::*;
 use ohos_qos_binding::{set_thread_qos, QosLevel::UserInteractive};
@@ -94,6 +95,22 @@ fn send_message(message: Message) {
         let mut tx = tx.borrow_mut();
         tx.as_mut().unwrap().send(message).unwrap();
     })
+}
+
+fn keycode_to_ime_character(keycode: KeyCode) -> Option<char> {
+    match keycode {
+        KeyCode::Key1 => Some('1'),
+        KeyCode::Key2 => Some('2'),
+        KeyCode::Key3 => Some('3'),
+        KeyCode::Key4 => Some('4'),
+        KeyCode::Key5 => Some('5'),
+        KeyCode::Key6 => Some('6'),
+        KeyCode::Key7 => Some('7'),
+        KeyCode::Key8 => Some('8'),
+        KeyCode::Key9 => Some('9'),
+        KeyCode::Key0 => Some('0'),
+        _ => None,
+    }
 }
 
 struct OpenGtxState {
@@ -236,9 +253,11 @@ struct MainThreadState {
     fullscreen: bool,
     update_requested: bool,
     keymods: KeyMods,
-
     opengtx: Option<OpenGtxState>,
     dumped_threads_after_first_frame: bool,
+    messages_tx: mpsc::Sender<Message>,
+    ime: Option<IME>,
+    ime_enabled: bool,
 }
 
 impl MainThreadState {
@@ -340,11 +359,31 @@ impl MainThreadState {
                 }
             }
             Message::KeyDown { keycode } => {
+                match keycode {
+                    KeyCode::LeftShift | KeyCode::RightShift => self.keymods.shift = true,
+                    KeyCode::LeftControl | KeyCode::RightControl => self.keymods.ctrl = true,
+                    KeyCode::LeftAlt | KeyCode::RightAlt => self.keymods.alt = true,
+                    KeyCode::LeftSuper | KeyCode::RightSuper => self.keymods.logo = true,
+                    _ => {}
+                }
                 self.event_handler
-                    .key_down_event(keycode, Default::default(), false);
+                    .key_down_event(keycode, self.keymods, false);
+                if self.ime_enabled {
+                    if let Some(character) = keycode_to_ime_character(keycode) {
+                        self.event_handler
+                            .char_event(character, self.keymods, false);
+                    }
+                }
             }
             Message::KeyUp { keycode } => {
-                self.event_handler.key_up_event(keycode, Default::default());
+                match keycode {
+                    KeyCode::LeftShift | KeyCode::RightShift => self.keymods.shift = false,
+                    KeyCode::LeftControl | KeyCode::RightControl => self.keymods.ctrl = false,
+                    KeyCode::LeftAlt | KeyCode::RightAlt => self.keymods.alt = false,
+                    KeyCode::LeftSuper | KeyCode::RightSuper => self.keymods.logo = false,
+                    _ => {}
+                }
+                self.event_handler.key_up_event(keycode, self.keymods);
             }
             Message::Pause => self.event_handler.window_minimized_event(),
             Message::Resume => self.event_handler.window_restored_event(),
@@ -364,9 +403,79 @@ impl MainThreadState {
                 self.update_requested = true;
             }
             SetFullscreen(_) => {} //not support currently
-            ShowKeyboard(_) => {}  //not support currently
+            ShowKeyboard(show) => {
+                if show {
+                    self.show_keyboard();
+                } else {
+                    self.hide_keyboard();
+                }
+            }
+            SetImeEnabled(enabled) => {
+                self.set_ime_enabled(enabled);
+            }
             _ => {}
         }
+    }
+
+    fn set_ime_enabled(&mut self, enabled: bool) {
+        self.ime_enabled = enabled;
+
+        if enabled {
+            self.install_ime_callbacks();
+            if let Some(ime) = &self.ime {
+                ime.attach();
+            }
+        } else if let Some(ime) = &self.ime {
+            ime.detach();
+        }
+    }
+
+    fn show_keyboard(&mut self) {
+        self.install_ime_callbacks();
+        self.ime_enabled = true;
+        if let Some(ime) = &self.ime {
+            ime.show_keyboard();
+        }
+    }
+
+    fn hide_keyboard(&mut self) {
+        self.ime_enabled = false;
+        if let Some(ime) = &self.ime {
+            ime.hide_keyboard();
+        }
+    }
+
+    fn install_ime_callbacks(&mut self) {
+        let ime = self.ime.get_or_insert_with(|| IME::new(Default::default()));
+
+        let tx = self.messages_tx.clone();
+        ime.insert_text(move |text| {
+            for character in text.chars() {
+                let _ = tx.send(Message::Character {
+                    character: character as u32,
+                });
+            }
+        });
+
+        let tx = self.messages_tx.clone();
+        ime.on_delete(move |_count| {
+            let _ = tx.send(Message::KeyDown {
+                keycode: KeyCode::Backspace,
+            });
+            let _ = tx.send(Message::KeyUp {
+                keycode: KeyCode::Backspace,
+            });
+        });
+
+        let tx = self.messages_tx.clone();
+        ime.on_enter(move |_enter_key| {
+            let _ = tx.send(Message::KeyDown {
+                keycode: KeyCode::Enter,
+            });
+            let _ = tx.send(Message::KeyUp {
+                keycode: KeyCode::Enter,
+            });
+        });
     }
 
     fn frame(&mut self) {
@@ -444,8 +553,8 @@ pub unsafe extern "C" fn on_dispatch_key_event(
     let ret = OH_NativeXComponent_GetKeyEventAction(event, &mut action);
     assert!(ret == 0, "Get key event action failed");
 
-    let code = ohos_input_sys::key_code::Input_KeyCode::KEYCODE_FN;
-    let ret = OH_NativeXComponent_GetKeyEventCode(event, &mut std::mem::transmute(code));
+    let mut code = ohos_input_sys::key_code::Input_KeyCode::KEYCODE_UNKNOWN as i32;
+    let ret = OH_NativeXComponent_GetKeyEventCode(event, &mut code);
     assert!(ret == 0, "Get key event code failed");
 
     let keycode = keycodes::translate_keycode(code);
@@ -494,6 +603,7 @@ where
 
     let tx2 = tx.clone();
     MESSAGES_TX.with(move |messages_tx| *messages_tx.borrow_mut() = Some(tx2));
+    let state_tx = tx.clone();
     thread::spawn(move || {
         //set thread QoS to USER INTERACTIVE
         let result = set_thread_qos(UserInteractive);
@@ -575,6 +685,9 @@ where
             event_handler,
             opengtx: None,
             dumped_threads_after_first_frame: false,
+            messages_tx: state_tx,
+            ime: None,
+            ime_enabled: false,
             quit: false,
             fullscreen: conf.fullscreen,
             update_requested: true,
