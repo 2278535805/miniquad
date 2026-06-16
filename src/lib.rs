@@ -530,7 +530,7 @@ where
 }
 
 #[cfg(target_env = "ohos")]
-extern "C" {
+unsafe extern "C" {
     fn quad_main();
 }
 
