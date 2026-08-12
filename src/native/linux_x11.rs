@@ -792,6 +792,7 @@ impl X11Display {
                         }
                     }
                 }
+                UpdateTextInputState { .. } => {}
             }
         }
     }
