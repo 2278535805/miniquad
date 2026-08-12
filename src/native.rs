@@ -80,6 +80,15 @@ pub(crate) enum Request {
     ShowKeyboard(bool),
     SetImePosition { x: i32, y: i32 },
     SetImeEnabled(bool),
+    UpdateTextInputState {
+        text: String,
+        selection_start: usize,
+        selection_end: usize,
+        is_password: bool,
+        is_multiline: bool,
+        element_id: u64,
+        max_length: usize,
+    },
 }
 
 pub trait Clipboard: Send + Sync {

@@ -265,6 +265,7 @@ impl MacosDisplay {
             SetImeEnabled(..) => {
                 // IME enable/disable not implemented for macOS yet
             }
+            UpdateTextInputState { .. } => {}
         }
     }
 }
