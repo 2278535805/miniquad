@@ -1175,6 +1175,7 @@ impl WindowsDisplay {
             SetImeEnabled(enabled) => {
                 self.set_ime_enabled(enabled);
             }
+            UpdateTextInputState { .. } => {}
         }
     }
 }
