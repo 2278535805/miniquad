@@ -114,6 +114,7 @@ extern "C" {
     pub static NSPasteboardURLReadingFileURLsOnlyKey: ObjcId;
     pub static NSTrackingArea: ObjcId;
     pub static NSStringPboardType: ObjcId;
+    pub static NSPasteboardTypeString: ObjcId;
     pub static NSPasteboardTypeFileURL: ObjcId;
 }
 
@@ -522,6 +523,7 @@ pub enum NSBackingStoreType {
 }
 
 #[repr(C)]
+#[derive(Copy, Clone, Debug)]
 pub struct NSRange {
     pub location: u64,
     pub length: u64,

@@ -154,6 +154,48 @@ pub fn get_event_key_modifier(event: ObjcId) -> KeyMods {
 }
 
 pub fn get_event_keycode(event: ObjcId) -> Option<KeyCode> {
+    unsafe {
+        let chars_obj: ObjcId = msg_send![event, charactersIgnoringModifiers];
+        if chars_obj != nil {
+            let s = nsstring_to_string(chars_obj);
+            if let Some(ch) = s.chars().next() {
+                let lower = ch.to_ascii_lowercase();
+                if lower >= 'a' && lower <= 'z' {
+                    let code = match lower {
+                        'a' => KeyCode::A,
+                        'b' => KeyCode::B,
+                        'c' => KeyCode::C,
+                        'd' => KeyCode::D,
+                        'e' => KeyCode::E,
+                        'f' => KeyCode::F,
+                        'g' => KeyCode::G,
+                        'h' => KeyCode::H,
+                        'i' => KeyCode::I,
+                        'j' => KeyCode::J,
+                        'k' => KeyCode::K,
+                        'l' => KeyCode::L,
+                        'm' => KeyCode::M,
+                        'n' => KeyCode::N,
+                        'o' => KeyCode::O,
+                        'p' => KeyCode::P,
+                        'q' => KeyCode::Q,
+                        'r' => KeyCode::R,
+                        's' => KeyCode::S,
+                        't' => KeyCode::T,
+                        'u' => KeyCode::U,
+                        'v' => KeyCode::V,
+                        'w' => KeyCode::W,
+                        'x' => KeyCode::X,
+                        'y' => KeyCode::Y,
+                        'z' => KeyCode::Z,
+                        _ => unreachable!(),
+                    };
+                    return Some(code);
+                }
+            }
+        }
+    }
+
     let scan_code: core::ffi::c_ushort = unsafe { msg_send![event, keyCode] };
 
     // Check mapping here
