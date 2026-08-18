@@ -141,6 +141,7 @@ extern "C" {
     pub static UIKeyboardDidShowNotification: ObjcId;
     pub static UIKeyboardWillHideNotification: ObjcId;
     pub static UIKeyboardDidChangeFrameNotification: ObjcId;
+    pub static UIPasteboardNameGeneral: ObjcId;
     pub fn UIApplicationMain(
         argc: i32,
         argv: *mut *mut i8,
@@ -370,6 +371,28 @@ unsafe impl Encode for NSRect {
             "{{CGRect={}{}}}",
             NSPoint::encode().as_str(),
             NSSize::encode().as_str()
+        );
+        unsafe { Encoding::from_str(&encoding) }
+    }
+}
+
+#[repr(C)]
+#[derive(Copy, Debug, Clone, Default, PartialEq)]
+pub struct UIEdgeInsets {
+    pub top: f64,
+    pub left: f64,
+    pub bottom: f64,
+    pub right: f64,
+}
+
+unsafe impl Encode for UIEdgeInsets {
+    fn encode() -> Encoding {
+        let encoding = format!(
+            "{{UIEdgeInsets={}{}{}{}}}",
+            f64::encode().as_str(),
+            f64::encode().as_str(),
+            f64::encode().as_str(),
+            f64::encode().as_str()
         );
         unsafe { Encoding::from_str(&encoding) }
     }
