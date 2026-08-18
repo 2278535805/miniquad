@@ -11,11 +11,70 @@ use crate::{
 };
 
 pub fn nsstring_to_string(string: ObjcId) -> String {
+    if string.is_null() {
+        return String::new();
+    }
     unsafe {
         let utf8_string: *const core::ffi::c_uchar = msg_send![string, UTF8String];
+        if utf8_string.is_null() {
+            return String::new();
+        }
         let utf8_len: usize = msg_send![string, lengthOfBytesUsingEncoding: UTF8_ENCODING];
         let slice = std::slice::from_raw_parts(utf8_string, utf8_len);
-        std::str::from_utf8_unchecked(slice).to_owned()
+        match std::str::from_utf8(slice) {
+            Ok(s) => s.to_owned(),
+            Err(_) => String::from_utf8_lossy(slice).into_owned(),
+        }
+    }
+}
+
+pub fn utf16_offset_to_byte_index(s: &str, utf16_offset: usize) -> usize {
+    let mut current_u16 = 0;
+    for (byte_idx, c) in s.char_indices() {
+        if current_u16 >= utf16_offset {
+            return byte_idx;
+        }
+        current_u16 += c.len_utf16();
+    }
+    s.len()
+}
+
+pub fn char_index_to_utf16_offset(s: &str, char_idx: usize) -> usize {
+    let mut current_char = 0;
+    let mut utf16_offset = 0;
+    for c in s.chars() {
+        if current_char >= char_idx {
+            break;
+        }
+        utf16_offset += c.len_utf16();
+        current_char += 1;
+    }
+    utf16_offset
+}
+
+pub fn utf16_offset_to_char_index(s: &str, utf16_offset: usize) -> usize {
+    let mut current_u16 = 0;
+    let mut char_idx = 0;
+    for c in s.chars() {
+        if current_u16 >= utf16_offset {
+            break;
+        }
+        current_u16 += c.len_utf16();
+        char_idx += 1;
+    }
+    char_idx
+}
+
+pub fn utf16_slice(s: &str, start_u16: usize, end_u16: usize) -> &str {
+    if start_u16 >= end_u16 {
+        return "";
+    }
+    let start_byte = utf16_offset_to_byte_index(s, start_u16);
+    let end_byte = utf16_offset_to_byte_index(s, end_u16);
+    if start_byte <= end_byte && end_byte <= s.len() {
+        &s[start_byte..end_byte]
+    } else {
+        ""
     }
 }
 
