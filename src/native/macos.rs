@@ -304,7 +304,7 @@ impl MacosDisplay {
                 if !enabled && !self.marked_text.is_empty() {
                     self.marked_text.clear();
                     if let Some(event_handler) = self.context() {
-                        event_handler.on_ime_preedit("");
+                        event_handler.on_ime_preedit("", 0);
                     }
                 }
             }
@@ -750,7 +750,8 @@ unsafe fn view_base_decl(decl: &mut ClassDecl) {
 
             payload.marked_text = text.clone();
             if let Some(event_handler) = payload.context() {
-                event_handler.on_ime_preedit(&text);
+                let cursor_pos = text.encode_utf16().count();
+                event_handler.on_ime_preedit(&text, cursor_pos);
             }
         }
     }
@@ -759,7 +760,7 @@ unsafe fn view_base_decl(decl: &mut ClassDecl) {
         let payload = get_window_payload(this);
         payload.marked_text.clear();
         if let Some(event_handler) = payload.context() {
-            event_handler.on_ime_preedit("");
+            event_handler.on_ime_preedit("", 0);
         }
     }
 
@@ -784,7 +785,7 @@ unsafe fn view_base_decl(decl: &mut ClassDecl) {
             let mods = payload.modifiers.to_keymods();
             if let Some(event_handler) = payload.context() {
                 if is_ime_commit {
-                    event_handler.on_ime_preedit("");
+                    event_handler.on_ime_preedit("", 0);
                     event_handler.on_ime_commit(Some(&text));
                 } else {
                     for c in text.chars() {

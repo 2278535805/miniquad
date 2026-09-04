@@ -707,6 +707,7 @@ unsafe extern "system" fn win32_wndproc(
                 }
                 
                 if should_notify_end {
+                    event_handler.on_ime_preedit("", 0);
                     event_handler.on_ime_commit(None);
                 }
                 ImmReleaseContext(hwnd, himc);

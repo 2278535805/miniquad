@@ -1611,7 +1611,8 @@ where
                         }
                     }
                     WaylandEvent::ImePreedit(text) => {
-                        event_handler.on_ime_preedit(&text);
+                        let cursor_pos = text.encode_utf16().count();
+                        event_handler.on_ime_preedit(&text, cursor_pos);
                     }
                     WaylandEvent::ImeCommit(text) => {
                         event_handler.on_ime_commit(text.as_deref());

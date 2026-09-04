@@ -313,7 +313,8 @@ pub extern "C" fn on_ime_state_changed(
 pub extern "C" fn on_ime_preedit(text_ptr: *mut u8, text_len: usize) {
     let text = unsafe { String::from_raw_parts(text_ptr, text_len, text_len) };
     tl_event_handler(|event_handler| {
-        event_handler.on_ime_preedit(&text);
+        let cursor_pos = text.encode_utf16().count();
+        event_handler.on_ime_preedit(&text, cursor_pos);
     });
 }
 

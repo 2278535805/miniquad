@@ -165,7 +165,8 @@ fn dispatch_message(payload: &mut IosDisplay, msg: Message) {
         }
         Message::ImePreedit(text) => {
             if let Some(ref mut event_handler) = payload.event_handler {
-                event_handler.on_ime_preedit(&text);
+                let cursor_pos = text.encode_utf16().count();
+                event_handler.on_ime_preedit(&text, cursor_pos);
             }
         }
         Message::ImeCommit(text) => {

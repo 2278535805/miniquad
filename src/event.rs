@@ -234,7 +234,7 @@ pub trait EventHandler {
     /// can be requested with `ctx.dropped_file_bytes()`.
     fn files_dropped_event(&mut self) {}
 
-    /// Get ime preedit text
+    /// Get IME preedit text and the cursor position in UTF-16 code units.
     fn on_ime_preedit(&mut self, _text: &str, _cursor_pos: usize) {}
     
     /// Called when IME composition is committed with final text
