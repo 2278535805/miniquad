@@ -57,6 +57,7 @@ pub struct X11Display {
     xic: libx11::XIC,
     ime_pos: (i32, i32),
     preedit_text: String,
+    preedit_cursor: usize,
     pending_preedit_update: bool,
     xim_callbacks: [libx11::XIMCallback; 4],
 }
@@ -127,6 +128,7 @@ unsafe extern "C" fn preedit_draw_callback(
     }
 
     display.preedit_text = chars.into_iter().collect();
+    display.preedit_cursor = draw_data.caret as usize;
     display.pending_preedit_update = true;
 }
 
@@ -313,8 +315,7 @@ impl X11Display {
                     .map(|d| d.ime_enabled)
                     .unwrap_or(false);
                 if ime_active {
-                    let cursor_pos = self.preedit_text.encode_utf16().count();
-                    event_handler.on_ime_preedit(&self.preedit_text, cursor_pos);
+                    event_handler.on_ime_preedit(&self.preedit_text, self.preedit_cursor);
                 }
             }
             if filtered != 0 {
@@ -327,8 +328,7 @@ impl X11Display {
                 .map(|d| d.ime_enabled)
                 .unwrap_or(false);
             if ime_active {
-                let cursor_pos = self.preedit_text.encode_utf16().count();
-                event_handler.on_ime_preedit(&self.preedit_text, cursor_pos);
+                event_handler.on_ime_preedit(&self.preedit_text, self.preedit_cursor);
             }
         }
         match event.type_0 {
@@ -1063,6 +1063,7 @@ where
             xic: std::ptr::null_mut(),
             ime_pos: (0, 0),
             preedit_text: String::new(),
+            preedit_cursor: 0,
             pending_preedit_update: false,
             xim_callbacks: [libx11::XIMCallback {
                 client_data: std::ptr::null_mut(),

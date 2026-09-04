@@ -738,7 +738,7 @@ unsafe fn view_base_decl(decl: &mut ClassDecl) {
         this: &Object,
         _sel: Sel,
         string: ObjcId,
-        _selected_range: NSRange,
+        selected_range: NSRange,
         _replacement_range: NSRange,
     ) {
         let payload = get_window_payload(this);
@@ -753,7 +753,7 @@ unsafe fn view_base_decl(decl: &mut ClassDecl) {
 
             payload.marked_text = text.clone();
             if let Some(event_handler) = payload.context() {
-                let cursor_pos = text.encode_utf16().count();
+                let cursor_pos = selected_range.location as usize;
                 event_handler.on_ime_preedit(&text, cursor_pos);
             }
         }
