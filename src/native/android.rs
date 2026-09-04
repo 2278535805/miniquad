@@ -245,7 +245,8 @@ impl MainThreadState {
                 self.event_handler.key_up_event(keycode, self.keymods);
             }
             Message::ImePreedit(text) => {
-                self.event_handler.on_ime_preedit(&text);
+                let cursor_pos = text.encode_utf16().count();
+                self.event_handler.on_ime_preedit(&text, cursor_pos);
             }
             Message::ImeCommit(text) => {
                 self.event_handler.on_ime_commit(text.as_deref());

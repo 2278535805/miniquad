@@ -313,7 +313,8 @@ impl X11Display {
                     .map(|d| d.ime_enabled)
                     .unwrap_or(false);
                 if ime_active {
-                    event_handler.on_ime_preedit(&self.preedit_text);
+                    let cursor_pos = self.preedit_text.encode_utf16().count();
+                    event_handler.on_ime_preedit(&self.preedit_text, cursor_pos);
                 }
             }
             if filtered != 0 {
@@ -326,7 +327,8 @@ impl X11Display {
                 .map(|d| d.ime_enabled)
                 .unwrap_or(false);
             if ime_active {
-                event_handler.on_ime_preedit(&self.preedit_text);
+                let cursor_pos = self.preedit_text.encode_utf16().count();
+                event_handler.on_ime_preedit(&self.preedit_text, cursor_pos);
             }
         }
         match event.type_0 {
@@ -358,7 +360,7 @@ impl X11Display {
                                 .map(|d| d.ime_enabled)
                                 .unwrap_or(false);
                             if ime_active {
-                                event_handler.on_ime_preedit("");
+                                event_handler.on_ime_preedit("", 0);
                                 if s.chars().count() > 1 {
                                     event_handler.on_ime_commit(Some(s));
                                 } else {
