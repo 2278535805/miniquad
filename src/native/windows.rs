@@ -678,8 +678,8 @@ unsafe extern "system" fn win32_wndproc(
                 // Composition String
                 if (flags & GCS_COMPSTR) != 0 || (flags & GCS_CURSORPOS) != 0 {
                     let compstr_len = ImmGetCompositionStringW(himc, GCS_COMPSTR, std::ptr::null_mut(), 0);
-                    let cursor_pos_len = ImmGetCompositionStringW(himc, GCS_CURSORPOS, std::ptr::null_mut(), 0);
                     if compstr_len > 0 {
+                        let cursor_pos_len = ImmGetCompositionStringW(himc, GCS_CURSORPOS, std::ptr::null_mut(), 0);
                         let mut buffer: Vec<u16> = vec![0; (compstr_len as usize / 2) + 1];
                         ImmGetCompositionStringW(himc, GCS_COMPSTR, buffer.as_mut_ptr() as *mut _, compstr_len as u32);
                         let char_count = compstr_len as usize / 2;

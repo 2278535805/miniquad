@@ -138,7 +138,9 @@ impl WaylandPayload {
                         }
                     };
                     self.compose_preediting = true;
-                    self.events.push(WaylandEvent::ImePreedit(preedit_str));
+                    let cursor_pos = preedit_str.len();
+                    self.events
+                        .push(WaylandEvent::ImePreedit(preedit_str, cursor_pos));
                     return;
                 }
                 XKB_COMPOSE_COMPOSED => {
@@ -150,7 +152,7 @@ impl WaylandPayload {
                     );
                     if self.compose_preediting {
                         self.compose_preediting = false;
-                        self.events.push(WaylandEvent::ImePreedit(String::new()));
+                        self.events.push(WaylandEvent::ImePreedit(String::new(), 0));
                     }
                     (libxkb.xkb_compose_state_reset)(compose_state);
 
@@ -166,14 +168,14 @@ impl WaylandPayload {
                 XKB_COMPOSE_CANCELLED => {
                     if self.compose_preediting {
                         self.compose_preediting = false;
-                        self.events.push(WaylandEvent::ImePreedit(String::new()));
+                        self.events.push(WaylandEvent::ImePreedit(String::new(), 0));
                     }
                     (libxkb.xkb_compose_state_reset)(compose_state);
                 }
                 XKB_COMPOSE_NOTHING => {
                     if self.compose_preediting {
                         self.compose_preediting = false;
-                        self.events.push(WaylandEvent::ImePreedit(String::new()));
+                        self.events.push(WaylandEvent::ImePreedit(String::new(), 0));
                     }
                 }
                 _ => {}
@@ -691,7 +693,7 @@ enum WaylandEvent {
     WindowMinimized,
     WindowRestored,
     FrameCompleted,
-    ImePreedit(String),
+    ImePreedit(String, usize),
     ImeCommit(Option<String>),
 }
 
@@ -753,7 +755,7 @@ unsafe extern "C" fn keyboard_handle_leave(
     display.keyboard_context.enter_serial = None;
     if display.compose_preediting {
         display.compose_preediting = false;
-        display.events.push(WaylandEvent::ImePreedit(String::new()));
+        display.events.push(WaylandEvent::ImePreedit(String::new(), 0));
     }
     if !display.xkb_compose_state.is_null() {
         (display.xkb.xkb_compose_state_reset)(display.xkb_compose_state);
@@ -1050,7 +1052,7 @@ unsafe extern "C" fn text_input_handle_preedit_string(
     _text_input: *mut extensions::text_input::zwp_text_input_v3,
     text: *const core::ffi::c_char,
     _cursor_begin: core::ffi::c_int,
-    _cursor_end: core::ffi::c_int,
+    cursor_end: core::ffi::c_int,
 ) {
     let display: &mut WaylandPayload = &mut *(data as *mut _);
     display.external_ime_active = true;
@@ -1062,7 +1064,7 @@ unsafe extern "C" fn text_input_handle_preedit_string(
             .unwrap_or("")
             .to_string()
     };
-    display.events.push(WaylandEvent::ImePreedit(preedit));
+    display.events.push(WaylandEvent::ImePreedit(preedit, cursor_end as usize));
 }
 
 unsafe extern "C" fn text_input_handle_commit_string(
@@ -1610,8 +1612,7 @@ where
                             display.update_requested = true;
                         }
                     }
-                    WaylandEvent::ImePreedit(text) => {
-                        let cursor_pos = text.encode_utf16().count();
+                    WaylandEvent::ImePreedit(text, cursor_pos) => {
                         event_handler.on_ime_preedit(&text, cursor_pos);
                     }
                     WaylandEvent::ImeCommit(text) => {
