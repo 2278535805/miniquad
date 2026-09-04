@@ -25,9 +25,9 @@ use winapi::{
 /// Composition String
 const GCS_COMPSTR: DWORD = 0x0008;
 /// Result String
+const GCS_CURSORPOS: DWORD = 0x0080;
+const GCS_DELTASTART: DWORD = 0x0100;
 const GCS_RESULTSTR: DWORD = 0x0800;
-const GCS_CURSORPOS: DWORD = 0x0100;
-const GCS_DELTASTART: DWORD = 0x0200;
 
 // IME message constants
 const WM_IME_SETCONTEXT: UINT = 0x0281;
@@ -54,6 +54,9 @@ const CFS_CANDIDATEPOS: DWORD = 0x0040;
 
 // ImmAssociateContextEx flags
 const IACE_DEFAULT: DWORD = 0x0010;
+
+// Offset for candidate window below composition position
+const CANDIDATE_WINDOW_Y_OFFSET: i32 = 5;
 
 const WHEEL_DELTA: f32 = 120.0;
 
@@ -162,7 +165,7 @@ impl WindowsDisplay {
             let cand_form = CANDIDATEFORM {
                 dwIndex: 0,
                 dwStyle: CFS_CANDIDATEPOS,
-                ptCurrentPos: POINT { x, y },
+                ptCurrentPos: POINT { x: x, y: y + CANDIDATE_WINDOW_Y_OFFSET },
                 rcArea: std::mem::zeroed(),
             };
             ImmSetCandidateWindow(himc, &cand_form);
@@ -673,30 +676,18 @@ unsafe extern "system" fn win32_wndproc(
                 let mut should_notify_end = false;
                 
                 // Composition String
-                if (flags & GCS_COMPSTR) != 0 {
-                    let len = ImmGetCompositionStringW(himc, GCS_COMPSTR, std::ptr::null_mut(), 0);
-                    if len > 0 {
-                        let mut buffer: Vec<u16> = vec![0; (len as usize / 2) + 1];
-                        ImmGetCompositionStringW(himc, GCS_COMPSTR, buffer.as_mut_ptr() as *mut _, len as u32);
-                        let char_count = len as usize / 2;
+                if (flags & GCS_COMPSTR) != 0 || (flags & GCS_CURSORPOS) != 0 {
+                    let compstr_len = ImmGetCompositionStringW(himc, GCS_COMPSTR, std::ptr::null_mut(), 0);
+                    let cursor_pos_len = ImmGetCompositionStringW(himc, GCS_CURSORPOS, std::ptr::null_mut(), 0);
+                    if compstr_len > 0 {
+                        let mut buffer: Vec<u16> = vec![0; (compstr_len as usize / 2) + 1];
+                        ImmGetCompositionStringW(himc, GCS_COMPSTR, buffer.as_mut_ptr() as *mut _, compstr_len as u32);
+                        let char_count = compstr_len as usize / 2;
                         let preedit_str = String::from_utf16_lossy(&buffer[..char_count]);
                         
-                        event_handler.on_ime_preedit(&preedit_str);
+                        event_handler.on_ime_preedit(&preedit_str, cursor_pos_len as usize);
                     } else {
                         should_notify_end = true;
-                    }
-                }
-                
-                // Check Cursor
-                if (flags & GCS_CURSORPOS) != 0 || (flags & GCS_DELTASTART) != 0 {
-                    let cursor_pos_len = ImmGetCompositionStringW(himc, GCS_CURSORPOS, std::ptr::null_mut(), 0);
-                    let delta_start_len = ImmGetCompositionStringW(himc, GCS_DELTASTART, std::ptr::null_mut(), 0);
-                    
-                    if cursor_pos_len == 0 && delta_start_len == 0 {
-                        let comp_len = ImmGetCompositionStringW(himc, GCS_COMPSTR, std::ptr::null_mut(), 0);
-                        if comp_len == 0 {
-                            should_notify_end = true;
-                        }
                     }
                 }
                 
@@ -724,17 +715,16 @@ unsafe extern "system" fn win32_wndproc(
             return 0;
         }
         WM_IME_SETCONTEXT => {
-            let user_disabled = IME_USER_DISABLED.load(std::sync::atomic::Ordering::Relaxed);
-            if !user_disabled {
-                return 1;
-            } else {
-                return 0;
-            }
+            return DefWindowProcW(hwnd, umsg, wparam, lparam);
+            // return 0;
+            // let user_disabled = IME_USER_DISABLED.load(std::sync::atomic::Ordering::Relaxed);
+            // if user_disabled {
+            //     return 0;
+            // } else {
+            //     return 1;
+            // }
         }
         WM_IME_STARTCOMPOSITION => {
-            // Offset for candidate window below composition position
-            const CANDIDATE_WINDOW_Y_OFFSET: i32 = 20;
-            
             // Set candidate window position when IME starts composition
             let himc = ImmGetContext(hwnd);
             if !himc.is_null() {
@@ -765,10 +755,11 @@ unsafe extern "system" fn win32_wndproc(
                 
                 ImmReleaseContext(hwnd, himc);
             }
-            return DefWindowProcW(hwnd, umsg, wparam, lparam);
+            return 0;
         }
         WM_IME_ENDCOMPOSITION => {
-            return DefWindowProcW(hwnd, umsg, wparam, lparam);
+            event_handler.on_ime_preedit("", 0);
+            return 0;
         }
         WM_IME_NOTIFY => {
             const IMN_SETOPENSTATUS: WPARAM = 0x0008;

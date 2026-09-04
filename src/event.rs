@@ -235,7 +235,7 @@ pub trait EventHandler {
     fn files_dropped_event(&mut self) {}
 
     /// Get ime preedit text
-    fn on_ime_preedit(&mut self, _text: &str) {}
+    fn on_ime_preedit(&mut self, _text: &str, _cursor_pos: usize) {}
     
     /// Called when IME composition is committed with final text
     fn on_ime_commit(&mut self, _text: Option<&str>) {}
