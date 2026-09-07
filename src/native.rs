@@ -74,11 +74,20 @@ pub(crate) enum Request {
     SetCursorGrab(bool),
     ShowMouse(bool),
     SetMouseCursor(crate::CursorIcon),
-    SetWindowSize { new_width: u32, new_height: u32 },
-    SetWindowPosition { new_x: u32, new_y: u32 },
+    SetWindowSize {
+        new_width: u32,
+        new_height: u32,
+    },
+    SetWindowPosition {
+        new_x: u32,
+        new_y: u32,
+    },
     SetFullscreen(bool),
     ShowKeyboard(bool),
-    SetImePosition { x: i32, y: i32 },
+    SetImePosition {
+        x: i32,
+        y: i32,
+    },
     SetImeEnabled(bool),
     UpdateTextInputState {
         text: String,
@@ -106,6 +115,9 @@ pub use ohos::*;
 
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux_x11;
+
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+pub mod linux_egl;
 
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux_wayland;
