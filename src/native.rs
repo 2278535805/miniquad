@@ -108,6 +108,9 @@ pub use ohos::*;
 pub mod linux_x11;
 
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+pub mod linux_egl;
+
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux_wayland;
 
 #[cfg(target_os = "android")]

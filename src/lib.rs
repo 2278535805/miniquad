@@ -527,24 +527,28 @@ where
     {
         let mut f = Some(f);
         let f = &mut f;
-        match conf.platform.linux_backend {
-            conf::LinuxBackend::X11Only => {
-                native::linux_x11::run(&conf, f).expect("X11 backend failed")
-            }
-            conf::LinuxBackend::WaylandOnly => {
-                native::linux_wayland::run(&conf, f).expect("Wayland backend failed")
-            }
-            conf::LinuxBackend::X11WithWaylandFallback => {
-                if let Err(err) = native::linux_x11::run(&conf, f) {
-                    eprintln!("{err:?}");
-                    eprintln!("Failed to initialize through X11! Trying wayland instead");
-                    native::linux_wayland::run(&conf, f);
+        if conf.headless {
+            native::linux_egl::run(&conf, f).expect("Linux headless EGL backend failed");
+        } else {
+            match conf.platform.linux_backend {
+                conf::LinuxBackend::X11Only => {
+                    native::linux_x11::run(&conf, f).expect("X11 backend failed")
                 }
-            }
-            conf::LinuxBackend::WaylandWithX11Fallback => {
-                if native::linux_wayland::run(&conf, f).is_none() {
-                    eprintln!("Failed to initialize through wayland! Trying X11 instead");
-                    native::linux_x11::run(&conf, f).unwrap()
+                conf::LinuxBackend::WaylandOnly => {
+                    native::linux_wayland::run(&conf, f).expect("Wayland backend failed")
+                }
+                conf::LinuxBackend::X11WithWaylandFallback => {
+                    if let Err(err) = native::linux_x11::run(&conf, f) {
+                        eprintln!("{err:?}");
+                        eprintln!("Failed to initialize through X11! Trying wayland instead");
+                        native::linux_wayland::run(&conf, f);
+                    }
+                }
+                conf::LinuxBackend::WaylandWithX11Fallback => {
+                    if native::linux_wayland::run(&conf, f).is_none() {
+                        eprintln!("Failed to initialize through wayland! Trying X11 instead");
+                        native::linux_x11::run(&conf, f).unwrap()
+                    }
                 }
             }
         }
