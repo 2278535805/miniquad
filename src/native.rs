@@ -119,6 +119,9 @@ pub mod android;
 #[cfg(target_os = "windows")]
 pub mod windows;
 
+#[cfg(target_os = "windows")]
+pub mod windows_egl;
+
 #[cfg(target_os = "android")]
 pub use android::*;
 
@@ -134,7 +137,7 @@ pub mod macos;
 #[cfg(target_os = "ios")]
 pub mod ios;
 
-#[cfg(any(target_os = "android", target_os = "linux"))]
+#[cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))]
 pub mod egl;
 
 // there is no glGetProcAddr on webgl, so its impossible to make "gl" module work

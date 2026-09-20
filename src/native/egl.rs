@@ -14,6 +14,13 @@ pub type EGLNativePixmapType = ::core::ffi::c_ulong;
 #[cfg(any(target_os = "android", target_env = "ohos"))]
 pub type EGLNativeWindowType = ::core::ffi::c_ulong;
 
+#[cfg(target_os = "windows")]
+pub type EGLNativeDisplayType = winapi::shared::windef::HDC;
+#[cfg(target_os = "windows")]
+pub type EGLNativePixmapType = winapi::shared::windef::HBITMAP;
+#[cfg(target_os = "windows")]
+pub type EGLNativeWindowType = winapi::shared::windef::HWND;
+
 pub use core::ptr::null_mut;
 use std::fmt::Display;
 
@@ -53,12 +60,26 @@ pub type EGLDisplay = *mut ::core::ffi::c_void;
 pub type EGLConfig = *mut ::core::ffi::c_void;
 pub type EGLSurface = *mut ::core::ffi::c_void;
 pub type EGLContext = *mut ::core::ffi::c_void;
+#[cfg(not(target_os = "windows"))]
 pub type __eglMustCastToProperFunctionPointerType = ::std::option::Option<unsafe extern "C" fn()>;
+#[cfg(target_os = "windows")]
+pub type __eglMustCastToProperFunctionPointerType =
+    ::std::option::Option<unsafe extern "system" fn()>;
+
+#[cfg(target_os = "windows")]
+const EGL_LIBRARY: &str = "libEGL.dll";
+#[cfg(not(target_os = "windows"))]
+const EGL_LIBRARY: &str = "libEGL.so";
+
+#[cfg(target_os = "windows")]
+const EGL_LIBRARY_FALLBACK: &str = "libEGL.dll";
+#[cfg(not(target_os = "windows"))]
+const EGL_LIBRARY_FALLBACK: &str = "libEGL.so.1";
 
 crate::declare_module! {
+    @abi "system",
     LibEgl,
-    "libEGL.so",
-    "libEGL.so.1",
+    [EGL_LIBRARY, EGL_LIBRARY_FALLBACK],
     ...
     ...
     pub fn eglChooseConfig(
@@ -287,26 +308,20 @@ impl HeadlessEglContext {
 
 type EglDeviceExt = *mut std::ffi::c_void;
 type EglQueryDevicesExt =
-    unsafe extern "C" fn(EGLint, *mut EglDeviceExt, *mut EGLint) -> EGLBoolean;
+    unsafe extern "system" fn(EGLint, *mut EglDeviceExt, *mut EGLint) -> EGLBoolean;
 type EglGetPlatformDisplayExt =
-    unsafe extern "C" fn(u32, *mut std::ffi::c_void, *const EGLint) -> EGLDisplay;
+    unsafe extern "system" fn(u32, *mut std::ffi::c_void, *const EGLint) -> EGLDisplay;
 
 unsafe fn query_devices_proc(egl: &LibEgl) -> Option<EglQueryDevicesExt> {
     let symbol = b"eglQueryDevicesEXT\0";
     let address = (egl.eglGetProcAddress)(symbol.as_ptr() as _)?;
-    Some(std::mem::transmute::<
-        unsafe extern "C" fn(),
-        EglQueryDevicesExt,
-    >(address))
+    Some(std::mem::transmute::<_, EglQueryDevicesExt>(address))
 }
 
 unsafe fn get_platform_display_proc(egl: &LibEgl) -> Option<EglGetPlatformDisplayExt> {
     let symbol = b"eglGetPlatformDisplayEXT\0";
     let address = (egl.eglGetProcAddress)(symbol.as_ptr() as _)?;
-    Some(std::mem::transmute::<
-        unsafe extern "C" fn(),
-        EglGetPlatformDisplayExt,
-    >(address))
+    Some(std::mem::transmute::<_, EglGetPlatformDisplayExt>(address))
 }
 
 unsafe fn choose_headless_display(egl: &LibEgl) -> Result<EGLDisplay, EglError> {

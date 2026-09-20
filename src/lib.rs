@@ -566,7 +566,11 @@ where
 
     #[cfg(target_os = "windows")]
     {
-        native::windows::run(&conf, f);
+        if conf.headless {
+            native::windows_egl::run(&conf, f).expect("Windows headless EGL backend failed");
+        } else {
+            native::windows::run(&conf, f);
+        }
     }
 
     #[cfg(target_os = "macos")]

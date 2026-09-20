@@ -50,6 +50,40 @@ rustup target add x86_64-pc-windows-gnu
 cargo run --example quad
 ```
 
+### Windows headless rendering
+
+Set `Conf::headless` to `true` to render into an EGL pbuffer using
+[ANGLE](https://github.com/google/angle)'s OpenGL ES 3 / D3D11 backend.
+This path does not create an application window, HWND/HDC or WGL context.
+Deploy `libEGL.dll` and `libGLESv2.dll` from the same D3D11-enabled ANGLE build
+beside the executable, along with any dependencies of that build (such as
+`d3dcompiler_47.dll`). DLL architecture must match the executable.
+
+```rust
+let conf = miniquad::conf::Conf {
+    headless: true,
+    platform: miniquad::conf::Platform {
+        // Use CPU rendering for remote desktop / machines without a usable GPU.
+        windows_egl: miniquad::conf::WindowsEgl::D3D11Warp,
+        ..Default::default()
+    },
+    ..Default::default()
+};
+```
+
+The default `D3D11WithWarpFallback` tries hardware first and falls back to WARP
+during initialization. `D3D11` requires hardware; `D3D11Warp` always uses the CPU.
+The selected renderer is printed at startup. WARP trades GPU performance for
+independence from hardware graphics drivers. This does not implement recovery
+from device loss after initialization.
+
+Shaders must use GLSL ES (`#version 100` or `#version 300 es`), and raw GL calls
+must be supported by GLES 3 / the available extensions. Desktop GLSL is not
+translated automatically. `set_window_size` recreates the pbuffer while keeping
+the context and GL resources. Window/input requests have no effect, the clipboard
+is empty, and DPI scale is 1. A pbuffer has no vsync, so `swap_interval` is ignored.
+Read results through `texture_read_pixels` or `glReadPixels` before exiting.
+
 ## WASM
 
 ```bash

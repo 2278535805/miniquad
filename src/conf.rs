@@ -72,6 +72,19 @@ pub enum LinuxBackend {
     WaylandWithX11Fallback,
 }
 
+/// Selects the ANGLE D3D11 device for Windows headless rendering.
+/// Requires matching `libEGL.dll` and `libGLESv2.dll` from an ANGLE build.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WindowsEgl {
+    /// Require a hardware D3D11 device.
+    D3D11,
+    /// Use the CPU through D3D11 WARP, including in remote desktop sessions.
+    D3D11Warp,
+    /// Try hardware first, then WARP if context initialization fails.
+    #[default]
+    D3D11WithWarpFallback,
+}
+
 /// On Apple platforms, choose the rendering API for creating contexts.
 ///
 /// Miniquad always links to Metal.framework (assuming it's present),
@@ -120,6 +133,9 @@ pub enum WaylandDecorations {
 /// Platform-specific settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Platform {
+    /// ANGLE device used on Windows when [`Conf::headless`] is enabled.
+    pub windows_egl: WindowsEgl,
+
     /// Determines how to load an OpenGL context on X11 (via GLX or EGL).
     pub linux_x11_gl: LinuxX11Gl,
 
@@ -161,7 +177,7 @@ pub struct Platform {
     pub sleep_interval_ms: Option<u32>,
 
     /// If `true`, the framebuffer includes an alpha channel.
-    /// Currently supported only on Android.
+    /// Used by EGL backends, including Windows headless rendering.
     ///
     /// - TODO: Make it works on web, on web it should make a transparent HTML5 canvas
     /// - TODO: Document(and check) what does it actually mean on android. Transparent window?
@@ -186,6 +202,7 @@ pub struct Platform {
 impl Default for Platform {
     fn default() -> Platform {
         Platform {
+            windows_egl: WindowsEgl::default(),
             linux_x11_gl: LinuxX11Gl::default(),
             linux_backend: LinuxBackend::default(),
             apple_gfx_api: AppleGfxApi::default(),
@@ -242,6 +259,11 @@ pub struct Conf {
     /// Platform-specific hints (e.g., context creation, driver settings).
     pub platform: Platform,
 
+    /// Render without a visible window. On Linux, uses an EGL pbuffer.
+    /// On Windows, uses ANGLE (OpenGL ES 3 + D3D11) and an EGL pbuffer,
+    /// without creating a Win32 window or WGL context. Deploy matching ANGLE
+    /// `libEGL.dll` and `libGLESv2.dll` beside the executable.
+    /// Desktop GLSL shaders must be adapted to GLSL ES for the Windows backend.
     pub headless: bool,
 }
 
