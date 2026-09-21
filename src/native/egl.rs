@@ -385,7 +385,7 @@ unsafe fn choose_headless_display(egl: &LibEgl) -> Result<EGLDisplay, EglError> 
     }
 }
 
-unsafe fn has_extension(egl: &LibEgl, display: EGLDisplay, extension: &str) -> bool {
+pub(crate) unsafe fn has_extension(egl: &LibEgl, display: EGLDisplay, extension: &str) -> bool {
     let value = (egl.eglQueryString)(display, EGL_EXTENSIONS as EGLint);
     if value.is_null() {
         return false;

@@ -77,9 +77,14 @@ The selected renderer is printed at startup. WARP trades GPU performance for
 independence from hardware graphics drivers. This does not implement recovery
 from device loss after initialization.
 
-Shaders should use GLSL ES (`#version 100` or `#version 300 es`). On GLES
-contexts, desktop version directives from `#version 130` onward are adapted to
-`#version 300 es`; shader features still need to be supported by GLES 3. Raw GL
+ANGLE is asked for the newest OpenGL ES context it can provide (3.0, 3.1 or
+3.2). Shader sources are adapted to the context automatically: the `#version`
+directive is optional. Shaders written in the old `attribute`/`varying` style
+are compiled as GLSL ES 1.00, modern `in`/`out` shaders as the newest GLSL ES
+version the context supports, and desktop directives (for example
+`#version 330` or `#version 450`) are translated to GLSL ES. Fragment shaders
+get a default float precision when they do not declare one. Shader features
+still need to be supported by the GLES version in use. Raw GL
 calls must be supported by GLES 3 / the available extensions. `set_window_size`
 recreates the pbuffer while keeping the context and GL resources. Window/input
 requests have no effect, the clipboard is empty, and DPI scale is 1. A pbuffer

@@ -156,13 +156,46 @@ impl AngleContext {
             }
             Err(error) => return Err(error),
         };
-        let attributes = [EGL_CONTEXT_CLIENT_VERSION as _, 3, EGL_NONE as _];
-        self.context =
-            (self.egl.eglCreateContext)(self.display, self.config, null_mut(), attributes.as_ptr());
+        self.context = self.create_context();
         if self.context.is_null() {
-            return Err(self.error("eglCreateContext(OpenGL ES 3)"));
+            return Err(self.error("eglCreateContext(OpenGL ES)"));
         }
         self.resize(conf.window_width.max(1), conf.window_height.max(1))
+    }
+
+    /// Creates the newest OpenGL ES context the driver can provide.
+    ///
+    /// ANGLE always exposes OpenGL ES 3.0, newer builds also support 3.1/3.2.
+    /// Requesting the version explicitly keeps the highest available feature
+    /// set, while the fallback chain works with every ANGLE build. Shaders are
+    /// adapted to whatever version was actually returned.
+    unsafe fn create_context(&mut self) -> EGLContext {
+        if has_extension(&self.egl, self.display, "EGL_KHR_create_context") {
+            for (major, minor) in [(3u32, 2u32), (3, 1), (3, 0)] {
+                let attributes = [
+                    EGL_CONTEXT_MAJOR_VERSION_KHR as EGLint,
+                    major as EGLint,
+                    EGL_CONTEXT_MINOR_VERSION_KHR as EGLint,
+                    minor as EGLint,
+                    EGL_NONE as EGLint,
+                ];
+                // Drop the error of a failed attempt so the final message is
+                // about the last try only.
+                (self.egl.eglGetError)();
+                let context = (self.egl.eglCreateContext)(
+                    self.display,
+                    self.config,
+                    null_mut(),
+                    attributes.as_ptr(),
+                );
+                if !context.is_null() {
+                    return context;
+                }
+            }
+        }
+        // Some EGL implementations only honor EGL_CONTEXT_CLIENT_VERSION.
+        let attributes = [EGL_CONTEXT_CLIENT_VERSION as EGLint, 3, EGL_NONE as EGLint];
+        (self.egl.eglCreateContext)(self.display, self.config, null_mut(), attributes.as_ptr())
     }
 
     unsafe fn choose_config(&self, alpha: bool, samples: EGLint) -> Result<EGLConfig, String> {
