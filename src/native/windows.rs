@@ -1126,7 +1126,7 @@ unsafe fn create_msg_window() -> (HWND, HDC) {
 }
 
 impl WindowsDisplay {
-    unsafe fn get_proc_address(&mut self, proc: &str) -> Option<unsafe extern "C" fn() -> ()> {
+    unsafe fn get_proc_address(&mut self, proc: &str) -> Option<unsafe extern "system" fn() -> ()> {
         let proc = std::ffi::CString::new(proc).unwrap();
         let mut proc_ptr = (self.libopengl32.wglGetProcAddress)(proc.as_ptr());
         if proc_ptr.is_null() {
@@ -1138,7 +1138,7 @@ impl WindowsDisplay {
         }
         Some(std::mem::transmute::<
             *mut winapi::shared::minwindef::__some_function,
-            unsafe extern "C" fn(),
+            unsafe extern "system" fn(),
         >(proc_ptr))
     }
 
@@ -1314,7 +1314,7 @@ where
             conf.platform.swap_interval.unwrap_or(1),
         );
 
-        super::gl::load_gl_funcs(|proc| display.get_proc_address(proc));
+        super::gl::load_gl_funcs_system(|proc| display.get_proc_address(proc));
 
         // IMPORTANT: Show window AFTER WGL context is created
         // This ensures IME initializes correctly when window gains focus

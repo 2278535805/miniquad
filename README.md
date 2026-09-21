@@ -77,11 +77,13 @@ The selected renderer is printed at startup. WARP trades GPU performance for
 independence from hardware graphics drivers. This does not implement recovery
 from device loss after initialization.
 
-Shaders must use GLSL ES (`#version 100` or `#version 300 es`), and raw GL calls
-must be supported by GLES 3 / the available extensions. Desktop GLSL is not
-translated automatically. `set_window_size` recreates the pbuffer while keeping
-the context and GL resources. Window/input requests have no effect, the clipboard
-is empty, and DPI scale is 1. A pbuffer has no vsync, so `swap_interval` is ignored.
+Shaders should use GLSL ES (`#version 100` or `#version 300 es`). On GLES
+contexts, desktop version directives from `#version 130` onward are adapted to
+`#version 300 es`; shader features still need to be supported by GLES 3. Raw GL
+calls must be supported by GLES 3 / the available extensions. `set_window_size`
+recreates the pbuffer while keeping the context and GL resources. Window/input
+requests have no effect, the clipboard is empty, and DPI scale is 1. A pbuffer
+has no vsync, so `swap_interval` is ignored.
 `blocking_event_loop` is supported; with it, `sleep_interval_ms` requests periodic
 redraws. Read results through `texture_read_pixels` or `glReadPixels` before exiting.
 

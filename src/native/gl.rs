@@ -317,7 +317,7 @@ macro_rules! gl_loader {
             use super::*;
 
             $(
-                pub static mut $fn: Option<extern "system" fn ($($arg: $t),*) -> $res> = None;
+                pub static mut $fn: Option<unsafe extern "system" fn ($($arg: $t),*) -> $res> = None;
             )*
         }
 
@@ -329,6 +329,17 @@ macro_rules! gl_loader {
         )*
 
         pub fn load_gl_funcs<T: FnMut(&str) -> Option<unsafe extern "C" fn() -> ()>>(mut getprocaddr: T) {
+            $(
+                unsafe {
+                    let fn_name = stringify!($fn);
+                    __pfns::$fn = ::std::mem::transmute_copy(&getprocaddr(fn_name));
+                }
+            )*
+        }
+
+        pub fn load_gl_funcs_system<T: FnMut(&str) -> Option<unsafe extern "system" fn() -> ()>>(
+            mut getprocaddr: T,
+        ) {
             $(
                 unsafe {
                     let fn_name = stringify!($fn);

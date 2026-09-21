@@ -1,4 +1,7 @@
-use std::ffi::CString;
+use std::{
+    borrow::Cow,
+    ffi::{CStr, CString},
+};
 
 use crate::{window, ResourceManager};
 
@@ -648,7 +651,8 @@ pub fn load_shader(shader_type: GLenum, source: &str) -> Result<GLuint, ShaderEr
         let shader = glCreateShader(shader_type);
         assert!(shader != 0);
 
-        let cstring = CString::new(source)?;
+        let source = prepare_shader_source(source);
+        let cstring = CString::new(source.as_ref())?;
         let csource = [cstring];
         glShaderSource(shader, 1, csource.as_ptr() as *const _, std::ptr::null());
         glCompileShader(shader);
@@ -689,6 +693,59 @@ pub fn load_shader(shader_type: GLenum, source: &str) -> Result<GLuint, ShaderEr
 
         Ok(shader)
     }
+}
+
+fn prepare_shader_source(source: &str) -> Cow<'_, str> {
+    let version = unsafe { glGetString(GL_VERSION) };
+    if version.is_null() {
+        return Cow::Borrowed(source);
+    }
+
+    let version = unsafe { CStr::from_ptr(version as _) };
+    if !version.to_bytes().starts_with(b"OpenGL ES")
+        && !version.to_bytes().starts_with(b"WebGL 2")
+    {
+        return Cow::Borrowed(source);
+    }
+
+    let mut first_directive = true;
+    let mut offset = 0;
+    while offset < source.len() {
+        let line_end = source[offset..]
+            .find('\n')
+            .map_or(source.len(), |index| offset + index + 1);
+        let line = &source[offset..line_end];
+        let line_without_newline = line.strip_suffix('\n').unwrap_or(line);
+        let trimmed = line_without_newline.trim_start();
+
+        if first_directive && !trimmed.is_empty() && !trimmed.starts_with("//") {
+            first_directive = false;
+            let mut tokens = trimmed.split_whitespace();
+            let is_version = tokens.next() == Some("#version");
+            let version_number = tokens.next().and_then(|value| value.parse::<u32>().ok());
+            let is_es = tokens.any(|token| token == "es");
+
+            if is_version
+                && matches!(version_number, Some(value) if value >= 130)
+                && !is_es
+            {
+                let prefix_len = line_without_newline.len() - trimmed.len();
+                let mut replacement = String::with_capacity(source.len());
+                replacement.push_str(&source[..offset]);
+                replacement.push_str(&line_without_newline[..prefix_len]);
+                replacement.push_str("#version 300 es");
+                if line.ends_with('\n') {
+                    replacement.push('\n');
+                }
+                replacement.push_str(&source[line_end..]);
+                return Cow::Owned(replacement);
+            }
+        }
+
+        offset = line_end;
+    }
+
+    Cow::Borrowed(source)
 }
 
 impl GlContext {

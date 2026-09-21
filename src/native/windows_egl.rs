@@ -234,18 +234,15 @@ impl AngleContext {
         Ok(())
     }
 
-    fn get_proc_address(&self, name: &str) -> Option<unsafe extern "C" fn()> {
+    fn get_proc_address(&self, name: &str) -> Option<unsafe extern "system" fn()> {
         let cname = CString::new(name).unwrap();
         unsafe {
             if let Some(address) = (self.egl.eglGetProcAddress)(cname.as_ptr()) {
-                // The loader accepts an erased C pointer, then stores each typed GL
-                // function with the system ABI (stdcall on 32-bit Windows).
-                return Some(std::mem::transmute::<
-                    unsafe extern "system" fn(),
-                    unsafe extern "C" fn(),
-                >(address));
+                return Some(address);
             }
-            self.gles.get_symbol::<unsafe extern "C" fn()>(name).ok()
+            self.gles
+                .get_symbol::<unsafe extern "system" fn()>(name)
+                .ok()
         }
     }
 
@@ -410,7 +407,7 @@ where
             return Err(format!("ANGLE is missing required GLES 3 function {name}"));
         }
     }
-    gl::load_gl_funcs(|name| context.get_proc_address(name));
+    gl::load_gl_funcs_system(|name| context.get_proc_address(name));
     unsafe {
         let version = gl::glGetString(gl::GL_VERSION);
         if version.is_null()

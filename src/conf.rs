@@ -263,7 +263,8 @@ pub struct Conf {
     /// desktop OpenGL context. On Windows, uses ANGLE (OpenGL ES 3 + D3D11) and
     /// an EGL pbuffer, without creating a Win32 window or WGL context. Deploy
     /// matching ANGLE `libEGL.dll` and `libGLESv2.dll` beside the executable.
-    /// Desktop GLSL shaders must be adapted to GLSL ES for the Windows backend.
+    /// Desktop GLSL version directives from `#version 130` onward are adapted to
+    /// GLSL ES 3.00 when a GLES context is used.
     ///
     /// The DPI scale is always 1, `high_dpi` is ignored, and a pbuffer has no
     /// vsync, so `Platform::swap_interval` is only a hint. `Platform::blocking_event_loop`
