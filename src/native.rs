@@ -91,6 +91,20 @@ pub(crate) enum Request {
     },
 }
 
+/// Blocks on `rx` until a message arrives, timing out after `timeout` if it is set.
+/// Without a timeout this is a plain blocking `recv()`.
+pub(crate) fn rx_recv<T>(
+    rx: &std::sync::mpsc::Receiver<T>,
+    timeout: Option<std::time::Duration>,
+) -> Result<T, std::sync::mpsc::RecvTimeoutError> {
+    match timeout {
+        Some(timeout) => rx.recv_timeout(timeout),
+        None => rx
+            .recv()
+            .map_err(|_| std::sync::mpsc::RecvTimeoutError::Disconnected),
+    }
+}
+
 pub trait Clipboard: Send + Sync {
     fn get(&mut self) -> Option<String>;
     fn set(&mut self, string: &str);

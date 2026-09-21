@@ -173,7 +173,7 @@ pub struct Platform {
     /// continuously drawing without having to continuously schedule updates that can
     /// choke the receiver queue.
     ///
-    /// Currently supported only on Android.
+    /// Currently supported only on Android and the headless EGL backends.
     pub sleep_interval_ms: Option<u32>,
 
     /// If `true`, the framebuffer includes an alpha channel.
@@ -259,11 +259,15 @@ pub struct Conf {
     /// Platform-specific hints (e.g., context creation, driver settings).
     pub platform: Platform,
 
-    /// Render without a visible window. On Linux, uses an EGL pbuffer.
-    /// On Windows, uses ANGLE (OpenGL ES 3 + D3D11) and an EGL pbuffer,
-    /// without creating a Win32 window or WGL context. Deploy matching ANGLE
-    /// `libEGL.dll` and `libGLESv2.dll` beside the executable.
+    /// Render without a visible window. On Linux, uses an EGL pbuffer with a
+    /// desktop OpenGL context. On Windows, uses ANGLE (OpenGL ES 3 + D3D11) and
+    /// an EGL pbuffer, without creating a Win32 window or WGL context. Deploy
+    /// matching ANGLE `libEGL.dll` and `libGLESv2.dll` beside the executable.
     /// Desktop GLSL shaders must be adapted to GLSL ES for the Windows backend.
+    ///
+    /// The DPI scale is always 1, `high_dpi` is ignored, and a pbuffer has no
+    /// vsync, so `Platform::swap_interval` is only a hint. `Platform::blocking_event_loop`
+    /// is supported; with it, `Platform::sleep_interval_ms` requests periodic redraws.
     pub headless: bool,
 }
 

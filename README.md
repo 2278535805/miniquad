@@ -82,7 +82,22 @@ must be supported by GLES 3 / the available extensions. Desktop GLSL is not
 translated automatically. `set_window_size` recreates the pbuffer while keeping
 the context and GL resources. Window/input requests have no effect, the clipboard
 is empty, and DPI scale is 1. A pbuffer has no vsync, so `swap_interval` is ignored.
-Read results through `texture_read_pixels` or `glReadPixels` before exiting.
+`blocking_event_loop` is supported; with it, `sleep_interval_ms` requests periodic
+redraws. Read results through `texture_read_pixels` or `glReadPixels` before exiting.
+
+### Linux headless rendering
+
+Set `Conf::headless` to `true` to render into an EGL pbuffer with a desktop
+OpenGL context, without X11 or Wayland. This requires `libEGL` and a driver
+supporting either `EGL_EXT_platform_device` or
+`EGL_MESA_platform_surfaceless`, and a desktop OpenGL 3.x or newer context.
+The environment variable `MINIQUAD_EGL_DEVICE` selects the device index used
+with `eglQueryDevicesEXT` (defaults to 0). `set_window_size` recreates the
+pbuffer while keeping the context and GL resources, and `sample_count` is
+honored when a matching multisampled pbuffer config is available.
+Window/input requests have no effect, the clipboard is empty, and DPI scale is 1.
+`blocking_event_loop` is supported; with it, `sleep_interval_ms` requests periodic
+redraws. Read results through `texture_read_pixels` or `glReadPixels` before exiting.
 
 ## WASM
 

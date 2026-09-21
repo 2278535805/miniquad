@@ -120,7 +120,7 @@ macro_rules! declare_module {
             _module: std::rc::Rc<$crate::native::module::Module>,
             $($s_vis $s_name: $s_type,)*
             $($f_vis $f_name: unsafe extern $abi fn ($($f_arg),*)$( -> $f_ret)?,)*
-            $($v_vis $v_name: unsafe extern "C" fn ($($v_arg),*, ...)$( -> $v_ret)?,)*
+            $($v_vis $v_name: unsafe extern $abi fn ($($v_arg),*, ...)$( -> $v_ret)?,)*
             $($vis $field: $field_ty)*
         }
         impl $name {
@@ -131,7 +131,7 @@ macro_rules! declare_module {
                         Ok($name {
                             $($s_name: module.get_symbol::<$s_type>(stringify!($s_name))?,)*
                             $($f_name: module.get_symbol::<unsafe extern $abi fn ($($f_arg),*)$( -> $f_ret)?>(stringify!($f_name))?,)*
-                            $($v_name: module.get_symbol::<unsafe extern "C" fn ($($v_arg),*, ...)$( -> $v_ret)?>(stringify!($v_name))?,)*
+                            $($v_name: module.get_symbol::<unsafe extern $abi fn ($($v_arg),*, ...)$( -> $v_ret)?>(stringify!($v_name))?,)*
                             $($field: Default::default(),)*
                             _module: module.into(),
                         })

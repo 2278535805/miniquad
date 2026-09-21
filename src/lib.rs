@@ -525,11 +525,11 @@ where
 
     #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
     {
-        let mut f = Some(f);
-        let f = &mut f;
         if conf.headless {
             native::linux_egl::run(&conf, f).expect("Linux headless EGL backend failed");
         } else {
+            let mut f = Some(f);
+            let f = &mut f;
             match conf.platform.linux_backend {
                 conf::LinuxBackend::X11Only => {
                     native::linux_x11::run(&conf, f).expect("X11 backend failed")

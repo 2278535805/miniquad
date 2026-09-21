@@ -16,7 +16,6 @@ use crate::{
 
 const EGL_OPENGL_ES_API: u32 = 0x30A0;
 const EGL_OPENGL_ES3_BIT: EGLint = 0x0040;
-const EGL_SAMPLE_BUFFERS: EGLint = 0x3032;
 const EGL_PLATFORM_ANGLE_ANGLE: u32 = 0x3202;
 const EGL_PLATFORM_ANGLE_TYPE_ANGLE: EGLint = 0x3203;
 const EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE: EGLint = 0x3208;
@@ -148,6 +147,25 @@ impl AngleContext {
         } else {
             0
         };
+        let alpha = conf.platform.framebuffer_alpha;
+        self.config = match self.choose_config(alpha, samples) {
+            Ok(config) => config,
+            Err(error) if samples > 0 => {
+                eprintln!("{error}; falling back to a config without multisampling");
+                self.choose_config(alpha, 0)?
+            }
+            Err(error) => return Err(error),
+        };
+        let attributes = [EGL_CONTEXT_CLIENT_VERSION as _, 3, EGL_NONE as _];
+        self.context =
+            (self.egl.eglCreateContext)(self.display, self.config, null_mut(), attributes.as_ptr());
+        if self.context.is_null() {
+            return Err(self.error("eglCreateContext(OpenGL ES 3)"));
+        }
+        self.resize(conf.window_width.max(1), conf.window_height.max(1))
+    }
+
+    unsafe fn choose_config(&self, alpha: bool, samples: EGLint) -> Result<EGLConfig, String> {
         let attributes = [
             EGL_SURFACE_TYPE as _,
             EGL_PBUFFER_BIT as _,
@@ -160,26 +178,23 @@ impl AngleContext {
             EGL_BLUE_SIZE as _,
             8,
             EGL_ALPHA_SIZE as _,
-            if conf.platform.framebuffer_alpha {
-                8
-            } else {
-                0
-            },
+            if alpha { 8 } else { 0 },
             EGL_DEPTH_SIZE as _,
             16,
             EGL_STENCIL_SIZE as _,
             8,
-            EGL_SAMPLE_BUFFERS,
+            EGL_SAMPLE_BUFFERS as _,
             if samples > 0 { 1 } else { 0 },
             EGL_SAMPLES as _,
             samples,
             EGL_NONE as _,
         ];
+        let mut config = null_mut();
         let mut count = 0;
         if (self.egl.eglChooseConfig)(
             self.display,
             attributes.as_ptr(),
-            &mut self.config,
+            &mut config,
             1,
             &mut count,
         ) == 0
@@ -188,17 +203,10 @@ impl AngleContext {
         }
         if count == 0 {
             return Err(format!(
-                "ANGLE has no GLES 3 pbuffer config for sample_count={}",
-                conf.sample_count
+                "ANGLE has no GLES 3 pbuffer config with {samples} samples"
             ));
         }
-        let attributes = [EGL_CONTEXT_CLIENT_VERSION as _, 3, EGL_NONE as _];
-        self.context =
-            (self.egl.eglCreateContext)(self.display, self.config, null_mut(), attributes.as_ptr());
-        if self.context.is_null() {
-            return Err(self.error("eglCreateContext(OpenGL ES 3)"));
-        }
-        self.resize(conf.window_width.max(1), conf.window_height.max(1))
+        Ok(config)
     }
 
     unsafe fn resize(&mut self, width: i32, height: i32) -> Result<(), String> {
@@ -229,16 +237,15 @@ impl AngleContext {
     fn get_proc_address(&self, name: &str) -> Option<unsafe extern "C" fn()> {
         let cname = CString::new(name).unwrap();
         unsafe {
-            let address = (self.egl.eglGetProcAddress)(cname.as_ptr()).or_else(|| {
-                self.gles
-                    .get_symbol::<unsafe extern "system" fn()>(name)
-                    .ok()
-            });
-            // The loader accepts an erased C pointer, then stores each typed GL function
-            // with the system ABI (stdcall on 32-bit Windows).
-            std::mem::transmute::<Option<unsafe extern "system" fn()>, Option<unsafe extern "C" fn()>>(
-                address,
-            )
+            if let Some(address) = (self.egl.eglGetProcAddress)(cname.as_ptr()) {
+                // The loader accepts an erased C pointer, then stores each typed GL
+                // function with the system ABI (stdcall on 32-bit Windows).
+                return Some(std::mem::transmute::<
+                    unsafe extern "system" fn(),
+                    unsafe extern "C" fn(),
+                >(address));
+            }
+            self.gles.get_symbol::<unsafe extern "C" fn()>(name).ok()
         }
     }
 
@@ -349,6 +356,10 @@ fn main_loop(
     rx: Receiver<Request>,
 ) -> Result<(), String> {
     let mut update = true;
+    let rx_timeout = conf
+        .platform
+        .sleep_interval_ms
+        .map(|sleep| Duration::from_millis(sleep as u64));
     loop {
         if quit_requested(handler) {
             break;
@@ -372,10 +383,10 @@ fn main_loop(
                 gl::glFlush();
             }
         } else {
-            // Quit flags may be set from another thread without sending a request.
-            match rx.recv_timeout(Duration::from_millis(16)) {
+            match crate::native::rx_recv(&rx, rx_timeout) {
                 Ok(request) => process_request(request, context, handler, &mut update)?,
-                Err(RecvTimeoutError::Timeout) => {}
+                // Timeout so time to do a periodic update().
+                Err(RecvTimeoutError::Timeout) => update = true,
                 Err(RecvTimeoutError::Disconnected) => break,
             }
         }
