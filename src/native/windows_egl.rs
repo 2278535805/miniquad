@@ -441,6 +441,7 @@ where
         }
     }
     gl::load_gl_funcs_system(|name| context.get_proc_address(name));
+    gl::install_map_buffer_range_shim(|name| context.get_proc_address(name));
     unsafe {
         let version = gl::glGetString(gl::GL_VERSION);
         if version.is_null()
