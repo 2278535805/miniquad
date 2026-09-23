@@ -91,6 +91,20 @@ pub(crate) enum Request {
     },
 }
 
+/// Blocks on `rx` until a message arrives, timing out after `timeout` if it is set.
+/// Without a timeout this is a plain blocking `recv()`.
+pub(crate) fn rx_recv<T>(
+    rx: &std::sync::mpsc::Receiver<T>,
+    timeout: Option<std::time::Duration>,
+) -> Result<T, std::sync::mpsc::RecvTimeoutError> {
+    match timeout {
+        Some(timeout) => rx.recv_timeout(timeout),
+        None => rx
+            .recv()
+            .map_err(|_| std::sync::mpsc::RecvTimeoutError::Disconnected),
+    }
+}
+
 pub trait Clipboard: Send + Sync {
     fn get(&mut self) -> Option<String>;
     fn set(&mut self, string: &str);
@@ -108,6 +122,9 @@ pub use ohos::*;
 pub mod linux_x11;
 
 #[cfg(all(target_os = "linux", not(target_env = "ohos")))]
+pub mod linux_egl;
+
+#[cfg(all(target_os = "linux", not(target_env = "ohos")))]
 pub mod linux_wayland;
 
 #[cfg(target_os = "android")]
@@ -115,6 +132,9 @@ pub mod android;
 
 #[cfg(target_os = "windows")]
 pub mod windows;
+
+#[cfg(target_os = "windows")]
+pub mod windows_egl;
 
 #[cfg(target_os = "android")]
 pub use android::*;
@@ -131,7 +151,7 @@ pub mod macos;
 #[cfg(target_os = "ios")]
 pub mod ios;
 
-#[cfg(any(target_os = "android", target_os = "linux"))]
+#[cfg(any(target_os = "android", target_os = "linux", target_os = "windows"))]
 pub mod egl;
 
 // there is no glGetProcAddr on webgl, so its impossible to make "gl" module work

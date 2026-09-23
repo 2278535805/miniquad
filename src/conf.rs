@@ -72,6 +72,19 @@ pub enum LinuxBackend {
     WaylandWithX11Fallback,
 }
 
+/// Selects the ANGLE D3D11 device for Windows headless rendering.
+/// Requires matching `libEGL.dll` and `libGLESv2.dll` from an ANGLE build.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum WindowsEgl {
+    /// Require a hardware D3D11 device.
+    D3D11,
+    /// Use the CPU through D3D11 WARP, including in remote desktop sessions.
+    D3D11Warp,
+    /// Try hardware first, then WARP if context initialization fails.
+    #[default]
+    D3D11WithWarpFallback,
+}
+
 /// On Apple platforms, choose the rendering API for creating contexts.
 ///
 /// Miniquad always links to Metal.framework (assuming it's present),
@@ -120,6 +133,9 @@ pub enum WaylandDecorations {
 /// Platform-specific settings.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Platform {
+    /// ANGLE device used on Windows when [`Conf::headless`] is enabled.
+    pub windows_egl: WindowsEgl,
+
     /// Determines how to load an OpenGL context on X11 (via GLX or EGL).
     pub linux_x11_gl: LinuxX11Gl,
 
@@ -157,11 +173,11 @@ pub struct Platform {
     /// continuously drawing without having to continuously schedule updates that can
     /// choke the receiver queue.
     ///
-    /// Currently supported only on Android.
+    /// Currently supported only on Android and the headless EGL backends.
     pub sleep_interval_ms: Option<u32>,
 
     /// If `true`, the framebuffer includes an alpha channel.
-    /// Currently supported only on Android.
+    /// Used by EGL backends, including Windows headless rendering.
     ///
     /// - TODO: Make it works on web, on web it should make a transparent HTML5 canvas
     /// - TODO: Document(and check) what does it actually mean on android. Transparent window?
@@ -186,6 +202,7 @@ pub struct Platform {
 impl Default for Platform {
     fn default() -> Platform {
         Platform {
+            windows_egl: WindowsEgl::default(),
             linux_x11_gl: LinuxX11Gl::default(),
             linux_backend: LinuxBackend::default(),
             apple_gfx_api: AppleGfxApi::default(),
@@ -242,6 +259,18 @@ pub struct Conf {
     /// Platform-specific hints (e.g., context creation, driver settings).
     pub platform: Platform,
 
+    /// Render without a visible window. On Linux, uses an EGL pbuffer with a
+    /// desktop OpenGL context. On Windows, uses ANGLE (OpenGL ES 3 + D3D11) and
+    /// an EGL pbuffer, without creating a Win32 window or WGL context. Deploy
+    /// matching ANGLE `libEGL.dll` and `libGLESv2.dll` beside the executable.
+    /// The newest OpenGL ES version available is requested (3.0/3.1/3.2) and
+    /// shader sources are adapted to it: the `#version` directive is optional,
+    /// desktop versions are translated to GLSL ES and fragment shaders without
+    /// an explicit precision get a default float precision.
+    ///
+    /// The DPI scale is always 1, `high_dpi` is ignored, and a pbuffer has no
+    /// vsync, so `Platform::swap_interval` is only a hint. `Platform::blocking_event_loop`
+    /// is supported; with it, `Platform::sleep_interval_ms` requests periodic redraws.
     pub headless: bool,
 }
 

@@ -14,12 +14,28 @@ pub type EGLNativePixmapType = ::core::ffi::c_ulong;
 #[cfg(any(target_os = "android", target_env = "ohos"))]
 pub type EGLNativeWindowType = ::core::ffi::c_ulong;
 
+#[cfg(target_os = "windows")]
+pub type EGLNativeDisplayType = winapi::shared::windef::HDC;
+#[cfg(target_os = "windows")]
+pub type EGLNativePixmapType = winapi::shared::windef::HBITMAP;
+#[cfg(target_os = "windows")]
+pub type EGLNativeWindowType = winapi::shared::windef::HWND;
+
 pub use core::ptr::null_mut;
 use std::fmt::Display;
 
 pub const EGL_SUCCESS: u32 = 12288;
 
 pub const EGL_WINDOW_BIT: u32 = 4;
+pub const EGL_PBUFFER_BIT: u32 = 1;
+pub const EGL_OPENGL_BIT: u32 = 8;
+pub const EGL_RENDERABLE_TYPE: u32 = 12352;
+pub const EGL_OPENGL_API: u32 = 0x30A2;
+pub const EGL_EXTENSIONS: u32 = 0x3055;
+pub const EGL_CONTEXT_MAJOR_VERSION_KHR: u32 = 0x3098;
+pub const EGL_CONTEXT_MINOR_VERSION_KHR: u32 = 0x30FB;
+pub const EGL_PLATFORM_DEVICE_EXT: u32 = 0x313F;
+pub const EGL_PLATFORM_SURFACELESS_MESA: u32 = 0x31DD;
 
 pub const EGL_ALPHA_SIZE: u32 = 12321;
 pub const EGL_BLUE_SIZE: u32 = 12322;
@@ -28,6 +44,7 @@ pub const EGL_RED_SIZE: u32 = 12324;
 pub const EGL_DEPTH_SIZE: u32 = 12325;
 pub const EGL_STENCIL_SIZE: u32 = 12326;
 pub const EGL_SAMPLES: u32 = 12337;
+pub const EGL_SAMPLE_BUFFERS: u32 = 12338;
 pub const EGL_NATIVE_VISUAL_ID: u32 = 12334;
 pub const EGL_WIDTH: u32 = 12375;
 pub const EGL_HEIGHT: u32 = 12374;
@@ -44,12 +61,26 @@ pub type EGLDisplay = *mut ::core::ffi::c_void;
 pub type EGLConfig = *mut ::core::ffi::c_void;
 pub type EGLSurface = *mut ::core::ffi::c_void;
 pub type EGLContext = *mut ::core::ffi::c_void;
+#[cfg(not(target_os = "windows"))]
 pub type __eglMustCastToProperFunctionPointerType = ::std::option::Option<unsafe extern "C" fn()>;
+#[cfg(target_os = "windows")]
+pub type __eglMustCastToProperFunctionPointerType =
+    ::std::option::Option<unsafe extern "system" fn()>;
+
+#[cfg(target_os = "windows")]
+const EGL_LIBRARY: &str = "libEGL.dll";
+#[cfg(not(target_os = "windows"))]
+const EGL_LIBRARY: &str = "libEGL.so";
+
+#[cfg(target_os = "windows")]
+const EGL_LIBRARY_FALLBACK: &str = "libEGL.dll";
+#[cfg(not(target_os = "windows"))]
+const EGL_LIBRARY_FALLBACK: &str = "libEGL.so.1";
 
 crate::declare_module! {
+    @abi "system",
     LibEgl,
-    "libEGL.so",
-    "libEGL.so.1",
+    [EGL_LIBRARY, EGL_LIBRARY_FALLBACK],
     ...
     ...
     pub fn eglChooseConfig(
@@ -134,6 +165,7 @@ crate::declare_module! {
     pub fn eglWaitGL() -> EGLBoolean,
     pub fn eglWaitNative(EGLint) -> EGLBoolean,
     pub fn eglBindTexImage(EGLDisplay, EGLSurface, EGLint) -> EGLBoolean,
+    pub fn eglBindAPI(u32) -> EGLBoolean,
     pub fn eglReleaseTexImage(EGLDisplay, EGLSurface, EGLint) -> EGLBoolean,
     pub fn eglSurfaceAttrib(
         EGLDisplay,
@@ -150,7 +182,12 @@ crate::declare_module! {
 pub enum EglError {
     NoDisplay,
     InitializeFailed,
+    UnsupportedPlatform,
+    BindApiFailed,
+    NoConfig,
     CreateContextFailed,
+    CreateSurfaceFailed,
+    MakeCurrentFailed,
 }
 
 impl Display for EglError {
@@ -158,7 +195,12 @@ impl Display for EglError {
         match self {
             Self::NoDisplay => write!(f, "No display"),
             Self::InitializeFailed => write!(f, "Failed to initialize context"),
-            Self::CreateContextFailed => write!(f, "Faild to create context"),
+            Self::UnsupportedPlatform => write!(f, "No headless EGL platform is available"),
+            Self::BindApiFailed => write!(f, "Failed to bind the desktop OpenGL EGL API"),
+            Self::NoConfig => write!(f, "No compatible EGL pbuffer/OpenGL config was found"),
+            Self::CreateContextFailed => write!(f, "Failed to create desktop OpenGL context"),
+            Self::CreateSurfaceFailed => write!(f, "Failed to create EGL pbuffer surface"),
+            Self::MakeCurrentFailed => write!(f, "Failed to make EGL context current"),
         }
     }
 }
@@ -249,4 +291,242 @@ pub unsafe fn create_egl_context(
     }
 
     Ok((context, config, display))
+}
+pub struct HeadlessEglContext {
+    pub display: EGLDisplay,
+    pub config: EGLConfig,
+    pub surface: EGLSurface,
+    pub context: EGLContext,
+}
+
+impl HeadlessEglContext {
+    pub unsafe fn destroy(self, egl: &LibEgl) {
+        (egl.eglMakeCurrent)(self.display, null_mut(), null_mut(), null_mut());
+        if !self.surface.is_null() {
+            (egl.eglDestroySurface)(self.display, self.surface);
+        }
+        (egl.eglDestroyContext)(self.display, self.context);
+        (egl.eglTerminate)(self.display);
+    }
+
+    pub unsafe fn resize(&mut self, egl: &LibEgl, width: i32, height: i32) -> Result<(), EglError> {
+        let surface_attributes = [
+            EGL_WIDTH as EGLint,
+            width.max(1),
+            EGL_HEIGHT as EGLint,
+            height.max(1),
+            EGL_NONE as EGLint,
+        ];
+        let surface =
+            (egl.eglCreatePbufferSurface)(self.display, self.config, surface_attributes.as_ptr());
+        if surface.is_null() {
+            return Err(EglError::CreateSurfaceFailed);
+        }
+        if (egl.eglMakeCurrent)(self.display, surface, surface, self.context) == 0 {
+            (egl.eglDestroySurface)(self.display, surface);
+            return Err(EglError::MakeCurrentFailed);
+        }
+        if !self.surface.is_null() {
+            (egl.eglDestroySurface)(self.display, self.surface);
+        }
+        self.surface = surface;
+        Ok(())
+    }
+}
+
+type EglDeviceExt = *mut std::ffi::c_void;
+type EglQueryDevicesExt =
+    unsafe extern "system" fn(EGLint, *mut EglDeviceExt, *mut EGLint) -> EGLBoolean;
+type EglGetPlatformDisplayExt =
+    unsafe extern "system" fn(u32, *mut std::ffi::c_void, *const EGLint) -> EGLDisplay;
+
+unsafe fn query_devices_proc(egl: &LibEgl) -> Option<EglQueryDevicesExt> {
+    let symbol = b"eglQueryDevicesEXT\0";
+    let address = (egl.eglGetProcAddress)(symbol.as_ptr() as _)?;
+    Some(std::mem::transmute::<_, EglQueryDevicesExt>(address))
+}
+
+unsafe fn get_platform_display_proc(egl: &LibEgl) -> Option<EglGetPlatformDisplayExt> {
+    let symbol = b"eglGetPlatformDisplayEXT\0";
+    let address = (egl.eglGetProcAddress)(symbol.as_ptr() as _)?;
+    Some(std::mem::transmute::<_, EglGetPlatformDisplayExt>(address))
+}
+
+unsafe fn choose_headless_display(egl: &LibEgl) -> Result<EGLDisplay, EglError> {
+    let Some(get_platform_display) = get_platform_display_proc(egl) else {
+        return Err(EglError::UnsupportedPlatform);
+    };
+
+    if let Some(query_devices) = query_devices_proc(egl) {
+        let mut device_count = 0;
+        if query_devices(0, null_mut(), &mut device_count) != 0 && device_count > 0 {
+            let mut devices = vec![null_mut(); device_count as usize];
+            if query_devices(device_count, devices.as_mut_ptr(), &mut device_count) != 0 {
+                let selected = std::env::var("MINIQUAD_EGL_DEVICE")
+                    .ok()
+                    .and_then(|value| value.parse::<usize>().ok())
+                    .unwrap_or(0);
+                if let Some(device) = devices.get(selected).copied() {
+                    let display = get_platform_display(EGL_PLATFORM_DEVICE_EXT, device, null_mut());
+                    if !display.is_null() {
+                        return Ok(display);
+                    }
+                }
+            }
+        }
+    }
+
+    // Fall back to Mesa's surfaceless platform when no device display could be created.
+    let display = get_platform_display(EGL_PLATFORM_SURFACELESS_MESA, null_mut(), null_mut());
+    if display.is_null() {
+        Err(EglError::UnsupportedPlatform)
+    } else {
+        Ok(display)
+    }
+}
+
+pub(crate) unsafe fn has_extension(egl: &LibEgl, display: EGLDisplay, extension: &str) -> bool {
+    let value = (egl.eglQueryString)(display, EGL_EXTENSIONS as EGLint);
+    if value.is_null() {
+        return false;
+    }
+    std::ffi::CStr::from_ptr(value)
+        .to_string_lossy()
+        .split_whitespace()
+        .any(|item| item == extension)
+}
+
+unsafe fn choose_headless_config(
+    egl: &LibEgl,
+    display: EGLDisplay,
+    alpha_size: EGLint,
+    samples: EGLint,
+) -> Result<EGLConfig, EglError> {
+    #[rustfmt::skip]
+    let config_attributes = [
+        EGL_SURFACE_TYPE as EGLint, EGL_PBUFFER_BIT as EGLint,
+        EGL_RENDERABLE_TYPE as EGLint, EGL_OPENGL_BIT as EGLint,
+        EGL_RED_SIZE as EGLint, 8,
+        EGL_GREEN_SIZE as EGLint, 8,
+        EGL_BLUE_SIZE as EGLint, 8,
+        EGL_ALPHA_SIZE as EGLint, alpha_size,
+        EGL_DEPTH_SIZE as EGLint, 16,
+        EGL_STENCIL_SIZE as EGLint, 0,
+        EGL_SAMPLE_BUFFERS as EGLint, if samples > 0 { 1 } else { 0 },
+        EGL_SAMPLES as EGLint, samples,
+        EGL_NONE as EGLint,
+    ];
+    let mut available_configs = [null_mut(); 32];
+    let mut config_count = 0;
+    if (egl.eglChooseConfig)(
+        display,
+        config_attributes.as_ptr(),
+        available_configs.as_mut_ptr(),
+        available_configs.len() as EGLint,
+        &mut config_count,
+    ) == 0
+        || config_count <= 0
+    {
+        return Err(EglError::NoConfig);
+    }
+
+    Ok(
+        available_configs[0..(config_count as usize).min(available_configs.len())]
+            .iter()
+            .copied()
+            .find(|config| {
+                let mut red = 0;
+                let mut green = 0;
+                let mut blue = 0;
+                let mut config_alpha = 0;
+                let mut depth = 0;
+                (egl.eglGetConfigAttrib)(display, *config, EGL_RED_SIZE as _, &mut red) != 0
+                    && (egl.eglGetConfigAttrib)(display, *config, EGL_GREEN_SIZE as _, &mut green)
+                        != 0
+                    && (egl.eglGetConfigAttrib)(display, *config, EGL_BLUE_SIZE as _, &mut blue)
+                        != 0
+                    && (egl.eglGetConfigAttrib)(
+                        display,
+                        *config,
+                        EGL_ALPHA_SIZE as _,
+                        &mut config_alpha,
+                    ) != 0
+                    && (egl.eglGetConfigAttrib)(display, *config, EGL_DEPTH_SIZE as _, &mut depth)
+                        != 0
+                    && red == 8
+                    && green == 8
+                    && blue == 8
+                    && (alpha_size == 0 || config_alpha == alpha_size)
+                    && depth >= 16
+            })
+            .unwrap_or(available_configs[0]),
+    )
+}
+
+pub unsafe fn create_headless_egl_context(
+    egl: &mut LibEgl,
+    width: i32,
+    height: i32,
+    alpha: bool,
+    samples: i32,
+) -> Result<HeadlessEglContext, EglError> {
+    let display = choose_headless_display(egl)?;
+    if (egl.eglInitialize)(display, null_mut(), null_mut()) == 0 {
+        return Err(EglError::InitializeFailed);
+    }
+    if (egl.eglBindAPI)(EGL_OPENGL_API) == 0 {
+        (egl.eglTerminate)(display);
+        return Err(EglError::BindApiFailed);
+    }
+
+    let alpha_size = if alpha { 8 } else { 0 };
+    let samples = if samples > 1 { samples } else { 0 };
+    let config = match choose_headless_config(egl, display, alpha_size, samples) {
+        Ok(config) => config,
+        Err(error) => {
+            let fallback = if samples > 0 {
+                choose_headless_config(egl, display, alpha_size, 0).ok()
+            } else {
+                None
+            };
+            match fallback {
+                Some(config) => config,
+                None => {
+                    (egl.eglTerminate)(display);
+                    return Err(error);
+                }
+            }
+        }
+    };
+
+    let context_attributes = if has_extension(egl, display, "EGL_KHR_create_context") {
+        vec![
+            EGL_CONTEXT_MAJOR_VERSION_KHR as EGLint,
+            3,
+            EGL_CONTEXT_MINOR_VERSION_KHR as EGLint,
+            1,
+            EGL_NONE as EGLint,
+        ]
+    } else {
+        vec![EGL_NONE as EGLint]
+    };
+    let context = (egl.eglCreateContext)(display, config, null_mut(), context_attributes.as_ptr());
+    if context.is_null() {
+        (egl.eglTerminate)(display);
+        return Err(EglError::CreateContextFailed);
+    }
+
+    let mut result = HeadlessEglContext {
+        display,
+        config,
+        surface: null_mut(),
+        context,
+    };
+    if let Err(error) = result.resize(egl, width, height) {
+        (egl.eglDestroyContext)(display, context);
+        (egl.eglTerminate)(display);
+        return Err(error);
+    }
+
+    Ok(result)
 }

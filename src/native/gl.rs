@@ -14,9 +14,9 @@ pub type GLuint64 = ::core::ffi::c_ulonglong;
 pub type GLsizei = ::core::ffi::c_int;
 pub type GLchar = ::core::ffi::c_char;
 
-pub type khronos_ssize_t = ::core::ffi::c_long;
-pub type khronos_usize_t = ::core::ffi::c_ulong;
-pub type khronos_intptr_t = ::core::ffi::c_long;
+pub type khronos_ssize_t = isize;
+pub type khronos_usize_t = usize;
+pub type khronos_intptr_t = isize;
 
 pub type GLsizeiptr = khronos_ssize_t;
 pub type GLintptr = khronos_intptr_t;
@@ -249,6 +249,7 @@ pub const GL_TIME_ELAPSED: u32 = 35007;
 pub const GL_QUERY_RESULT: u32 = 34918;
 pub const GL_QUERY_RESULT_AVAILABLE: u32 = 34919;
 pub const GL_VENDOR: u32 = 0x1F00;
+pub const GL_RENDERER: u32 = 0x1F01;
 pub const GL_VERSION: u32 = 0x1F02;
 pub const GL_SHADING_LANGUAGE_VERSION: GLenum = 0x8B8C;
 pub const GL_FRONT_AND_BACK: GLenum = 0x0408;
@@ -316,7 +317,7 @@ macro_rules! gl_loader {
             use super::*;
 
             $(
-                pub static mut $fn: Option<extern "C" fn ($($arg: $t),*) -> $res> = None;
+                pub static mut $fn: Option<unsafe extern "system" fn ($($arg: $t),*) -> $res> = None;
             )*
         }
 
@@ -328,6 +329,17 @@ macro_rules! gl_loader {
         )*
 
         pub fn load_gl_funcs<T: FnMut(&str) -> Option<unsafe extern "C" fn() -> ()>>(mut getprocaddr: T) {
+            $(
+                unsafe {
+                    let fn_name = stringify!($fn);
+                    __pfns::$fn = ::std::mem::transmute_copy(&getprocaddr(fn_name));
+                }
+            )*
+        }
+
+        pub fn load_gl_funcs_system<T: FnMut(&str) -> Option<unsafe extern "system" fn() -> ()>>(
+            mut getprocaddr: T,
+        ) {
             $(
                 unsafe {
                     let fn_name = stringify!($fn);
@@ -654,6 +666,61 @@ gl_loader!(
     fn glUnmapBuffer(target: GLenum) -> (),
     fn glPolygonMode(face: GLenum, mode: GLenum) -> ()
 );
+
+type GlMapBufferRange = unsafe extern "system" fn(GLenum, GLintptr, GLsizeiptr, GLbitfield) -> *mut GLvoid;
+type GlGetBufferParameteriv = unsafe extern "system" fn(GLenum, GLenum, *mut GLint);
+
+static mut GL_MAP_BUFFER_RANGE: Option<GlMapBufferRange> = None;
+static mut GL_GET_BUFFER_PARAMETERIV: Option<GlGetBufferParameteriv> = None;
+
+/// `glMapBuffer` is desktop GL only; GLES 3 (ANGLE in the headless EGL
+/// backends) exposes `glMapBufferRange` instead.
+unsafe extern "system" fn glMapBuffer_from_range(target: GLenum, access: GLenum) -> *const GLubyte {
+    const GL_READ_ONLY: GLenum = 0x88B8;
+    const GL_WRITE_ONLY: GLenum = 0x88B9;
+    const GL_MAP_READ_BIT: GLbitfield = 0x0001;
+    const GL_MAP_WRITE_BIT: GLbitfield = 0x0002;
+    const GL_BUFFER_SIZE: GLenum = 0x8764;
+
+    let (Some(map_range), Some(get_parameter)) = (
+        *core::ptr::addr_of!(GL_MAP_BUFFER_RANGE),
+        *core::ptr::addr_of!(GL_GET_BUFFER_PARAMETERIV),
+    ) else {
+        return core::ptr::null();
+    };
+    let mut size: GLint = 0;
+    get_parameter(target, GL_BUFFER_SIZE, &mut size);
+    if size <= 0 {
+        return core::ptr::null();
+    }
+    let flags = match access {
+        GL_READ_ONLY => GL_MAP_READ_BIT,
+        GL_WRITE_ONLY => GL_MAP_WRITE_BIT,
+        _ => GL_MAP_READ_BIT | GL_MAP_WRITE_BIT,
+    };
+    map_range(target, 0, size as GLsizeiptr, flags) as *const GLubyte
+}
+
+/// Emulates `glMapBuffer` with `glMapBufferRange` when the driver does not
+/// provide it (e.g. ANGLE / GLES 3).
+pub fn install_map_buffer_range_shim<T: FnMut(&str) -> Option<unsafe extern "system" fn() -> ()>>(
+    mut getprocaddr: T,
+) {
+    unsafe {
+        if core::ptr::addr_of!(__pfns::glMapBuffer).read().is_some() {
+            return;
+        }
+        let (Some(map_range), Some(get_parameter)) = (
+            getprocaddr("glMapBufferRange"),
+            getprocaddr("glGetBufferParameteriv"),
+        ) else {
+            return;
+        };
+        GL_MAP_BUFFER_RANGE = Some(core::mem::transmute(map_range));
+        GL_GET_BUFFER_PARAMETERIV = Some(core::mem::transmute(get_parameter));
+        __pfns::glMapBuffer = Some(glMapBuffer_from_range);
+    }
+}
 
 // note that glGetString only works after first glSwapBuffer,
 // not just after context creation

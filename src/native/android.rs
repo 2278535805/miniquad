@@ -2,7 +2,7 @@ use crate::{
     event::{EventHandler, KeyCode, KeyMods, TouchPhase},
     native::{
         egl::{self, LibEgl},
-        NativeDisplayData,
+        rx_recv, NativeDisplayData,
     },
 };
 
@@ -576,19 +576,6 @@ where
         (s.libegl.eglDestroyContext)(s.egl_display, s.egl_context);
         (s.libegl.eglTerminate)(s.egl_display);
     });
-}
-
-/// Adds a call to Receiver as if there was a `.recv_timeout_opt(timeout)`
-/// where the `timeout` arg is optional.
-fn rx_recv<T>(
-    rx: &mpsc::Receiver<T>,
-    timeout: Option<Duration>,
-) -> Result<T, mpsc::RecvTimeoutError> {
-    match timeout {
-        Some(timeout) => rx.recv_timeout(timeout),
-        // No timeout specified so just do a normal blocking recv()
-        None => rx.recv().map_err(|_| mpsc::RecvTimeoutError::Disconnected),
-    }
 }
 
 #[no_mangle]

@@ -1,4 +1,7 @@
-use std::ffi::CString;
+use std::{
+    borrow::Cow,
+    ffi::{CStr, CString},
+};
 
 use crate::{window, ResourceManager};
 
@@ -648,7 +651,8 @@ pub fn load_shader(shader_type: GLenum, source: &str) -> Result<GLuint, ShaderEr
         let shader = glCreateShader(shader_type);
         assert!(shader != 0);
 
-        let cstring = CString::new(source)?;
+        let source = prepare_shader_source(shader_type, source);
+        let cstring = CString::new(source.as_ref())?;
         let csource = [cstring];
         glShaderSource(shader, 1, csource.as_ptr() as *const _, std::ptr::null());
         glCompileShader(shader);
@@ -688,6 +692,285 @@ pub fn load_shader(shader_type: GLenum, source: &str) -> Result<GLuint, ShaderEr
         }
 
         Ok(shader)
+    }
+}
+
+/// Highest GLSL ES version supported by the current context, or `None` for
+/// desktop OpenGL contexts.
+///
+/// GLSL ES contexts only accept a couple of `#version` values (`100`, `300 es`,
+/// and, when available, `310 es`/`320 es`), so shader sources have to be
+/// translated. Desktop OpenGL contexts are left untouched: they implicitly
+/// default to `#version 110` and accept the whole range of desktop GLSL
+/// versions.
+fn es_glsl_version() -> Option<u32> {
+    unsafe {
+        let version = glGetString(GL_VERSION);
+        if version.is_null() {
+            return None;
+        }
+        let bytes = CStr::from_ptr(version as _).to_bytes();
+        if bytes.starts_with(b"WebGL 2") {
+            // WebGL 2 is always backed by an OpenGL ES 3.0 context.
+            return Some(300);
+        }
+        let rest = bytes.strip_prefix(b"OpenGL ES".as_slice())?;
+        // "OpenGL ES-CM 1.1" and similar legacy strings have no space after
+        // the API name and only support GLSL ES 1.00.
+        if !rest.first().is_some_and(u8::is_ascii_whitespace) {
+            return Some(100);
+        }
+        let rest = String::from_utf8_lossy(rest);
+        let number = rest.split_whitespace().next()?;
+        let mut parts = number.split('.');
+        let major: u32 = parts.next()?.parse().ok()?;
+        let minor: u32 = parts.next().and_then(|part| part.parse().ok()).unwrap_or(0);
+        Some(match (major, minor) {
+            (2, _) => 100,
+            (3, 0) => 300,
+            (3, 1) => 310,
+            (3, _) => 320,
+            _ => 320,
+        })
+    }
+}
+
+/// A `#version` directive found in the shader source.
+struct VersionDirective {
+    version: u32,
+    es: bool,
+    /// Offset of the `#` that starts the directive.
+    start: usize,
+    /// Offset right after the line that contains the directive.
+    end: usize,
+}
+
+/// Returns the first byte offset that is neither whitespace nor part of a
+/// comment.
+fn skip_shader_insignificant(source: &str, mut offset: usize) -> usize {
+    /// UTF-8 byte order mark, as written by some Windows editors.
+    const BOM: &[u8] = b"\xEF\xBB\xBF";
+    let bytes = source.as_bytes();
+    loop {
+        while offset < bytes.len() && bytes[offset].is_ascii_whitespace() {
+            offset += 1;
+        }
+        if bytes[offset..].starts_with(BOM) {
+            offset += BOM.len();
+            continue;
+        }
+        if bytes[offset..].starts_with(b"//") {
+            offset += 2;
+            while offset < bytes.len() && bytes[offset] != b'\n' {
+                offset += 1;
+            }
+            continue;
+        }
+        if bytes[offset..].starts_with(b"/*") {
+            offset += 2;
+            while offset < bytes.len() && !bytes[offset..].starts_with(b"*/") {
+                offset += 1;
+            }
+            offset = (offset + 2).min(bytes.len());
+            continue;
+        }
+        return offset;
+    }
+}
+
+/// Parses the `#version` directive. Only the first significant line of the
+/// source can hold it, exactly like the GLSL preprocessor expects it.
+fn find_version_directive(source: &str) -> Option<VersionDirective> {
+    let start = skip_shader_insignificant(source, 0);
+    let bytes = source.as_bytes();
+    if bytes.get(start) != Some(&b'#') {
+        return None;
+    }
+
+    let end = source[start..]
+        .find('\n')
+        .map_or(source.len(), |index| start + index + 1);
+    let line = source[start..end].trim_end_matches(['\n', '\r']);
+    let line = line.split_once("//").map_or(line, |(code, _)| code);
+    let line = line.split_once("/*").map_or(line, |(code, _)| code);
+    let rest = line[1..].trim_start();
+    let rest = rest.strip_prefix("version")?;
+    if !rest.starts_with(|character: char| character.is_whitespace()) {
+        return None;
+    }
+
+    let mut tokens = rest.split_whitespace();
+    let version = tokens.next()?.parse::<u32>().ok()?;
+    let es = tokens.any(|token| token == "es");
+    Some(VersionDirective {
+        version,
+        es,
+        start,
+        end,
+    })
+}
+
+/// Invokes `f` for every identifier in the shader source, ignoring comments.
+fn for_each_shader_identifier<'a>(source: &'a str, mut f: impl FnMut(&'a str)) {
+    let bytes = source.as_bytes();
+    let mut offset = 0;
+    while offset < bytes.len() {
+        offset = skip_shader_insignificant(source, offset);
+        if offset >= bytes.len() {
+            break;
+        }
+        let byte = bytes[offset];
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = offset;
+            while offset < bytes.len()
+                && (bytes[offset].is_ascii_alphanumeric() || bytes[offset] == b'_')
+            {
+                offset += 1;
+            }
+            f(&source[start..offset]);
+        } else {
+            offset += 1;
+        }
+    }
+}
+
+/// `true` when the shader uses pre-`in`/`out` GLSL ES 1.00 syntax.
+fn shader_is_legacy(source: &str) -> bool {
+    const LEGACY_IDENTIFIERS: &[&str] = &[
+        "attribute",
+        "varying",
+        "gl_FragColor",
+        "gl_FragData",
+        "texture2D",
+        "texture2DProj",
+        "texture2DLod",
+        "texture2DProjLod",
+        "textureCube",
+        "textureCubeLod",
+    ];
+    let mut legacy = false;
+    for_each_shader_identifier(source, |identifier| {
+        if LEGACY_IDENTIFIERS.contains(&identifier) {
+            legacy = true;
+        }
+    });
+    legacy
+}
+
+/// `true` when the source already declares a default precision for floats.
+fn has_default_float_precision(source: &str) -> bool {
+    let mut previous: [&str; 2] = ["", ""];
+    let mut found = false;
+    for_each_shader_identifier(source, |identifier| {
+        if identifier == "float"
+            && previous[0] == "precision"
+            && matches!(previous[1], "lowp" | "mediump" | "highp")
+        {
+            found = true;
+        }
+        previous[0] = previous[1];
+        previous[1] = identifier;
+    });
+    found
+}
+
+/// Returns the offset where declarations may start, skipping leading comments,
+/// whitespace and `#extension`/`#pragma` directives.
+fn shader_declarations_offset(source: &str, mut offset: usize) -> usize {
+    loop {
+        offset = skip_shader_insignificant(source, offset);
+        if offset >= source.len() {
+            return offset;
+        }
+        let line_end = source[offset..]
+            .find('\n')
+            .map_or(source.len(), |index| offset + index + 1);
+        let line = source[offset..line_end].trim_start();
+        if line.starts_with("#extension") || line.starts_with("#pragma") {
+            offset = line_end;
+            continue;
+        }
+        return offset;
+    }
+}
+
+/// Rewrites a shader so it compiles on the current GLSL ES context.
+///
+/// On GLSL ES contexts any desktop version directive is mapped to the closest
+/// supported GLSL ES version, `#version 100` is used for shaders written in the
+/// old `attribute`/`varying` style and, when no version directive is present at
+/// all, one is inserted based on the syntax used. Fragment shaders get a
+/// default float precision if they do not declare one, because GLSL ES requires
+/// it and desktop shaders usually omit it.
+fn adapt_shader_source(shader_type: GLenum, source: &str, context_version: u32) -> Cow<'_, str> {
+    let directive = find_version_directive(source);
+    let legacy = shader_is_legacy(source);
+
+    // `context_version` is 100, 300, 310 or 320.
+    let target = match &directive {
+        // `#version 100` is always available, newer ES versions are clamped to
+        // what the context actually supports.
+        Some(directive) if directive.es => {
+            if directive.version <= 100 {
+                100
+            } else {
+                directive.version.min(context_version)
+            }
+        }
+        // GLSL 110/120 is the desktop version of GLSL ES 1.00.
+        Some(directive) if directive.version <= 120 => 100,
+        // Some desktop shaders use old syntax even with a modern version
+        // directive; those translate best to GLSL ES 1.00.
+        Some(_) if legacy => 100,
+        // Everything else maps to the newest GLSL ES version available.
+        Some(_) => context_version,
+        None if legacy => 100,
+        None => context_version,
+    };
+    let target_is_es3 = target > 100;
+
+    let same_version = directive
+        .as_ref()
+        .is_some_and(|directive| directive.version == target && directive.es == target_is_es3);
+    let needs_hoist = directive
+        .as_ref()
+        .is_some_and(|directive| directive.start > 0);
+    let needs_precision = shader_type == GL_FRAGMENT_SHADER && !has_default_float_precision(source);
+
+    if same_version && !needs_hoist && !needs_precision {
+        return Cow::Borrowed(source);
+    }
+
+    let mut adapted = String::with_capacity(source.len() + 64);
+    if target_is_es3 {
+        adapted.push_str("#version ");
+        adapted.push_str(&target.to_string());
+        adapted.push_str(" es\n");
+    } else {
+        adapted.push_str("#version 100\n");
+    }
+    let body_offset = adapted.len();
+    match &directive {
+        Some(directive) => {
+            let prefix = &source[..directive.start];
+            adapted.push_str(prefix.strip_prefix('\u{feff}').unwrap_or(prefix));
+            adapted.push_str(&source[directive.end..]);
+        }
+        None => adapted.push_str(source.strip_prefix('\u{feff}').unwrap_or(source)),
+    }
+
+    if needs_precision {
+        let offset = shader_declarations_offset(&adapted, body_offset);
+        adapted.insert_str(offset, "precision mediump float;\n");
+    }
+
+    Cow::Owned(adapted)
+}
+
+fn prepare_shader_source(shader_type: GLenum, source: &str) -> Cow<'_, str> {
+    match es_glsl_version() {
+        Some(context_version) => adapt_shader_source(shader_type, source, context_version),
+        None => Cow::Borrowed(source),
     }
 }
 

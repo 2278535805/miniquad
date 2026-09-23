@@ -50,6 +50,62 @@ rustup target add x86_64-pc-windows-gnu
 cargo run --example quad
 ```
 
+### Windows headless rendering
+
+Set `Conf::headless` to `true` to render into an EGL pbuffer using
+[ANGLE](https://github.com/google/angle)'s OpenGL ES 3 / D3D11 backend.
+This path does not create an application window, HWND/HDC or WGL context.
+Deploy `libEGL.dll` and `libGLESv2.dll` from the same D3D11-enabled ANGLE build
+beside the executable, along with any dependencies of that build (such as
+`d3dcompiler_47.dll`). DLL architecture must match the executable.
+
+```rust
+let conf = miniquad::conf::Conf {
+    headless: true,
+    platform: miniquad::conf::Platform {
+        // Use CPU rendering for remote desktop / machines without a usable GPU.
+        windows_egl: miniquad::conf::WindowsEgl::D3D11Warp,
+        ..Default::default()
+    },
+    ..Default::default()
+};
+```
+
+The default `D3D11WithWarpFallback` tries hardware first and falls back to WARP
+during initialization. `D3D11` requires hardware; `D3D11Warp` always uses the CPU.
+The selected renderer is printed at startup. WARP trades GPU performance for
+independence from hardware graphics drivers. This does not implement recovery
+from device loss after initialization.
+
+ANGLE is asked for the newest OpenGL ES context it can provide (3.0, 3.1 or
+3.2). Shader sources are adapted to the context automatically: the `#version`
+directive is optional. Shaders written in the old `attribute`/`varying` style
+are compiled as GLSL ES 1.00, modern `in`/`out` shaders as the newest GLSL ES
+version the context supports, and desktop directives (for example
+`#version 330` or `#version 450`) are translated to GLSL ES. Fragment shaders
+get a default float precision when they do not declare one. Shader features
+still need to be supported by the GLES version in use. Raw GL
+calls must be supported by GLES 3 / the available extensions. `set_window_size`
+recreates the pbuffer while keeping the context and GL resources. Window/input
+requests have no effect, the clipboard is empty, and DPI scale is 1. A pbuffer
+has no vsync, so `swap_interval` is ignored.
+`blocking_event_loop` is supported; with it, `sleep_interval_ms` requests periodic
+redraws. Read results through `texture_read_pixels` or `glReadPixels` before exiting.
+
+### Linux headless rendering
+
+Set `Conf::headless` to `true` to render into an EGL pbuffer with a desktop
+OpenGL context, without X11 or Wayland. This requires `libEGL` and a driver
+supporting either `EGL_EXT_platform_device` or
+`EGL_MESA_platform_surfaceless`, and a desktop OpenGL 3.x or newer context.
+The environment variable `MINIQUAD_EGL_DEVICE` selects the device index used
+with `eglQueryDevicesEXT` (defaults to 0). `set_window_size` recreates the
+pbuffer while keeping the context and GL resources, and `sample_count` is
+honored when a matching multisampled pbuffer config is available.
+Window/input requests have no effect, the clipboard is empty, and DPI scale is 1.
+`blocking_event_loop` is supported; with it, `sleep_interval_ms` requests periodic
+redraws. Read results through `texture_read_pixels` or `glReadPixels` before exiting.
+
 ## WASM
 
 ```bash
