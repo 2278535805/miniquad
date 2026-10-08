@@ -1030,33 +1030,6 @@ pub fn define_app_delegate() -> *const Class {
         send_message(Message::Pause);
     }
 
-    extern "C" fn scene_will_connect(_: &Object, _: Sel, notification: ObjcId) {
-        unsafe {
-            let scene: ObjcId = msg_send![notification, object];
-            let is_window_scene: BOOL =
-                msg_send![scene, isKindOfClass: class!(UIWindowScene)];
-            if is_window_scene == NO {
-                return;
-            }
-
-            let (view, view_ctrl) =
-                match PENDING_SCENE_VIEW_AND_CTRL.with(|cell| cell.borrow_mut().take()) {
-                    Some(pair) => pair,
-                    None => return,
-                };
-
-            let window: ObjcId = msg_send![class!(UIWindow), alloc];
-            let window: ObjcId = msg_send![window, initWithWindowScene: scene];
-            msg_send_![window, addSubview: view];
-            msg_send_![window, setRootViewController: view_ctrl];
-            msg_send_![window, makeKeyAndVisible];
-        }
-    }
-
-    extern "C" fn scene_did_activate(_: &Object, _: Sel, _: ObjcId) {
-        send_message(Message::Resume);
-    }
-
     unsafe {
         decl.add_method(
             sel!(window),
@@ -1079,13 +1052,41 @@ pub fn define_app_delegate() -> *const Class {
             sel!(applicationWillResignActive:),
             application_will_resign_active as extern "C" fn(&Object, Sel, ObjcId),
         );
+    }
+    decl.register()
+}
+
+fn define_hidden_textview() -> *const Class {
+    let superclass = class!(UITextView);
+    let mut decl = ClassDecl::new("QuadHiddenTextView", superclass).unwrap();
+
+    // Allow touches to pass through directly to the underlying QuadView
+    extern "C" fn hit_test(_: &Object, _: Sel, _: NSPoint, _: ObjcId) -> ObjcId {
+        nil
+    }
+
+    // Support standard context menu actions
+    extern "C" fn can_perform_action(_: &Object, _: Sel, action: Sel, _: ObjcId) -> BOOL {
+        if action == sel!(copy:)
+            || action == sel!(paste:)
+            || action == sel!(cut:)
+            || action == sel!(selectAll:)
+            || action == sel!(select:)
+        {
+            YES
+        } else {
+            NO
+        }
+    }
+
+    unsafe {
         decl.add_method(
-            sel!(sceneWillConnect:),
-            scene_will_connect as extern "C" fn(&Object, Sel, ObjcId),
+            sel!(hitTest:withEvent:),
+            hit_test as extern "C" fn(&Object, Sel, NSPoint, ObjcId) -> ObjcId,
         );
         decl.add_method(
-            sel!(sceneDidActivate:),
-            scene_did_activate as extern "C" fn(&Object, Sel, ObjcId),
+            sel!(canPerformAction:withSender:),
+            can_perform_action as extern "C" fn(&Object, Sel, Sel, ObjcId) -> BOOL,
         );
     }
     decl.register()

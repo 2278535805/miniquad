@@ -831,6 +831,7 @@ where
 
     display.init_drag_n_drop();
     display.libx11.show_window(display.display, display.window);
+    display.init_xim(display.window);
 
     (display.libx11.XFlush)(display.display);
 
@@ -944,6 +945,7 @@ where
 
     display.init_drag_n_drop();
     display.libx11.show_window(display.display, display.window);
+    display.init_xim(display.window);
     let (w, h) = display
         .libx11
         .query_window_size(display.display, display.window);
